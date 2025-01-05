@@ -26,7 +26,7 @@ An example of running RL training: (10 envs)
 ```bash
 python run.py -n 10
 ```
-<img  src="figs/train.gif" width="550">
+<img  src="figs/train.gif" width="300">
 
 - Evaluation
 
@@ -34,7 +34,7 @@ To test the trained policy, you can load a pretrained model from the checkpoint 
 ```bash
 python run.py -l -v -n 1
 ```
-<img  src="figs/eval.gif" width="550">
+<img  src="figs/eval.gif" width="300">
 
 ## Saving and Loading Checkpoints
 
