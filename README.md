@@ -1,6 +1,10 @@
 # Genesis Environment
 This repository contains example RL environment for Genesis general-purpose physics platform.
 
+## 🔥 News
+
+- [2025-01-08] Support [**MacOS**](#MacOS-Usage) training and visualization! 🎉
+  
 ## Requirements
 All necessary dependencies have been listed in `requirements.txt`.
 You can create a conda environment by:
@@ -21,8 +25,6 @@ conda create --name genesis_env --file requirements.txt
   - `GraspFixedRod`: Environment for grasping a fixed rod.
   - `GraspRandomBlock`: Environment for grasping a randomly placed block.
   - `GraspRandomRod`: Environment for grasping a randomly placed rod.
-
-
 
 ## Usage
 
@@ -68,4 +70,17 @@ You can load a checkpoint by setting the `--load` flag. We've provided a success
         self.target_model.eval()
 ```
 
+## MacOS Usage
+- Training
 
+You can add `-d mps` to train:
+```bash
+python run_dqn.py -n 10 -d mps
+```
+
+- Evaluation
+
+You can add `-d mps` to eval and visualization:
+```bash
+python run_dqn.py -l -v -n 1 -t GraspFixedBlock -d mps
+```
