@@ -25,7 +25,7 @@ def train_ppo(args):
     checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     try:
-        env = create_environment(args.task)(vis=args.vis, num_envs=args.num_envs)
+        env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
@@ -69,6 +69,7 @@ def arg_parser():
     parser.add_argument("-b", "--batch_size", type=int, default=None, help="Batch size for training")
     parser.add_argument("-hd", "--hidden_dim", type=int, default=64, help="Hidden dimension for the network")
     parser.add_argument("-t", "--task", type=str, default="GraspFixedBlock", help="Task to train on")
+    parser.add_argument("-d", "--device", type=str, default="cpu", help="device: cpu or cuda:x or mps for macos")
 
     args = parser.parse_args()
     return args
