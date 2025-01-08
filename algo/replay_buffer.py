@@ -2,9 +2,10 @@ import torch
 import random
 
 class ReplayBuffer:
-    def __init__(self, max_size, state_dim, action_dim):
+    def __init__(self, max_size, state_dim, action_dim, device):
+        self.device = device
         self.max_size = max_size
-        self.buffer = torch.zeros((max_size, state_dim * 2 + action_dim + 2)).to("cuda:0")  # State, action, reward, next_state, done
+        self.buffer = torch.zeros((max_size, state_dim * 2 + action_dim + 2)).to(self.device)  # State, action, reward, next_state, done
         self.ptr = 0
         self.size = 0
         self.state_dim = state_dim

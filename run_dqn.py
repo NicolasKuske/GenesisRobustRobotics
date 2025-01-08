@@ -25,19 +25,19 @@ def train_dqn(args):
     checkpoint_path = f"logs/{args.task}_dqn_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     try:
-        env = create_environment(args.task)(vis=args.vis, num_envs=args.num_envs)
+        env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
-    agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim)
+    agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim)
     num_episodes = 500
     batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
     target_update_interval = 10
 
     for episode in range(num_episodes):
         state = env.reset()
-        total_reward = torch.zeros(env.num_envs).to("cuda:0")
-        done_array = torch.tensor([False] * env.num_envs).to("cuda:0")
+        total_reward = torch.zeros(env.num_envs).to(args.device)
+        done_array = torch.tensor([False] * env.num_envs).to(args.device)
         for step in range(50):
             action = agent.select_action(state)
             next_state, reward, done = env.step(action)
@@ -63,6 +63,7 @@ def arg_parser():
     parser.add_argument("-b", "--batch_size", type=int, default=None, help="Batch size for training")
     parser.add_argument("-hd", "--hidden_dim", type=int, default=64, help="Hidden dimension for the network")
     parser.add_argument("-t", "--task", type=str, default="GraspFixedBlock", help="Task to train on")
+    parser.add_argument("-d", "--device", type=str, default="cpu", help="device: cpu or cuda:x")
 
     args = parser.parse_args()
     return args

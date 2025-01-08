@@ -6,10 +6,11 @@ from network.dqn import DQN
 from .replay_buffer import ReplayBuffer
 
 class DQNAgent:
-    def __init__(self, input_dim, output_dim, lr, gamma, epsilon, epsilon_decay, epsilon_min, load=False, num_envs=1, hidden_dim=64):
+    def __init__(self, input_dim, output_dim, lr, gamma, epsilon, epsilon_decay, epsilon_min, device, load=False, num_envs=1, hidden_dim=64):
+        self.device = device
         self.num_envs = num_envs
-        self.model = DQN(input_dim, output_dim, hidden_dim).to("cuda:0")
-        self.target_model = DQN(input_dim, output_dim, hidden_dim).to("cuda:0")
+        self.model = DQN(input_dim, output_dim, hidden_dim).to(self.device)
+        self.target_model = DQN(input_dim, output_dim, hidden_dim).to(self.device)
         self.target_model.load_state_dict(self.model.state_dict())
         if load: 
             self.load_checkpoint("logs/dqn_checkpoint.pth")
@@ -19,7 +20,7 @@ class DQNAgent:
         self.epsilon = epsilon if not load else 0
         self.epsilon_decay = epsilon_decay
         self.epsilon_min = epsilon_min
-        self.memory = ReplayBuffer(100000, state_dim=input_dim, action_dim=1)
+        self.memory = ReplayBuffer(100000, state_dim=input_dim, action_dim=1, device=self.device)
     
     def save_checkpoint(self, file_path):
         checkpoint = {
@@ -42,9 +43,9 @@ class DQNAgent:
             q_values = self.model(state)
         actions = torch.argmax(q_values, dim=1)
         num_envs = q_values.size(0)
-        random_action = torch.randint(0, q_values.size(1), (num_envs,)).to("cuda:0")
+        random_action = torch.randint(0, q_values.size(1), (num_envs,)).to(self.device)
         greedy_action = torch.argmax(q_values, dim=1)
-        mask = (torch.rand(num_envs) < self.epsilon).to("cuda:0")
+        mask = (torch.rand(num_envs) < self.epsilon).to(self.device)
         actions = torch.where(mask, random_action, greedy_action)
         return actions
 

@@ -3,7 +3,8 @@ import genesis as gs
 import torch
 
 class GraspFixedBlockEnv:
-    def __init__(self, vis, num_envs=1):
+    def __init__(self, vis, device, num_envs=1):
+        self.device = device
         self.action_space = 8  
         self.state_dim = 6  
 
@@ -41,18 +42,18 @@ class GraspFixedBlockEnv:
         self.build_env()
     
     def build_env(self):
-        self.motors_dof = torch.arange(7).to("cuda:0")
-        self.fingers_dof = torch.arange(7, 9).to("cuda:0")
-        franka_pos = torch.tensor([-1.0124, 1.5559, 1.3662, -1.6878, -1.5799, 1.7757, 1.4602, 0.04, 0.04]).to("cuda:0")
+        self.motors_dof = torch.arange(7).to(self.device)
+        self.fingers_dof = torch.arange(7, 9).to(self.device)
+        franka_pos = torch.tensor([-1.0124, 1.5559, 1.3662, -1.6878, -1.5799, 1.7757, 1.4602, 0.04, 0.04]).to(self.device)
         franka_pos = franka_pos.unsqueeze(0).repeat(self.num_envs, 1) 
         self.franka.set_qpos(franka_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
         self.end_effector = self.franka.get_link("hand")
         ## here self.pos and self.quat is target for the end effector; not the cube. cube position is set in reset()
-        pos = torch.tensor([0.65, 0.0, 0.135], dtype=torch.float32, device='cuda:0')
+        pos = torch.tensor([0.65, 0.0, 0.135], dtype=torch.float32, device=self.device)
         self.pos = pos.unsqueeze(0).repeat(self.num_envs, 1)
-        quat = torch.tensor([0, 1, 0, 0], dtype=torch.float32, device='cuda:0')
+        quat = torch.tensor([0, 1, 0, 0], dtype=torch.float32, device=self.device)
         self.quat = quat.unsqueeze(0).repeat(self.num_envs, 1)
         self.qpos = self.franka.inverse_kinematics(
             link=self.end_effector,
@@ -83,7 +84,7 @@ class GraspFixedBlockEnv:
         action_mask_6 = actions == 6 # Move forward
         action_mask_7 = actions == 7 # Move backward
 
-        finger_pos = torch.full((self.num_envs, 2), 0.04, dtype=torch.float32, device='cuda:0')
+        finger_pos = torch.full((self.num_envs, 2), 0.04, dtype=torch.float32, device=self.device)
         finger_pos[action_mask_1] = 0
         finger_pos[action_mask_2] = 0
         

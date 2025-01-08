@@ -29,14 +29,14 @@ def train_ppo(args):
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
-    agent = PPOAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, clip_epsilon=0.2, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim)
+    agent = PPOAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim)
     num_episodes = 500
     batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
 
     for episode in range(num_episodes):
         state = env.reset()
-        total_reward = torch.zeros(env.num_envs).to("cuda:0")
-        done_array = torch.tensor([False] * env.num_envs).to("cuda:0")
+        total_reward = torch.zeros(env.num_envs).to(args.device)
+        done_array = torch.tensor([False] * env.num_envs).to(args.device)
         states, actions, rewards, dones = [], [], [], []
 
         for step in range(50):

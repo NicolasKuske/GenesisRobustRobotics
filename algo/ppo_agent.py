@@ -6,9 +6,10 @@ import argparse
 from network.ppo import PPO
 
 class PPOAgent:
-    def __init__(self, input_dim, output_dim, lr, gamma, clip_epsilon, load=False, num_envs=1, hidden_dim=64):
+    def __init__(self, input_dim, output_dim, lr, gamma, clip_epsilon, device, load=False, num_envs=1, hidden_dim=64):
+        self.device = device
         self.num_envs = num_envs
-        self.model = PPO(input_dim, output_dim, hidden_dim).to("cuda:0")
+        self.model = PPO(input_dim, output_dim, hidden_dim).to(self.device)
         if load: 
             self.load_checkpoint("logs/ppo_checkpoint.pth")
             print("Loaded model from checkpoint")
@@ -39,8 +40,8 @@ class PPOAgent:
 
     def train(self, states, actions, rewards, dones):
         # Convert lists to tensors
-        states_tensor = torch.stack(states).to("cuda:0")
-        actions_tensor = torch.stack(actions).to("cuda:0")
+        states_tensor = torch.stack(states).to(self.device)
+        actions_tensor = torch.stack(actions).to(self.device)
         
         # Calculate discounted rewards
         discounted_rewards = []
@@ -49,7 +50,7 @@ class PPOAgent:
             R = reward + self.gamma * R * (~dones[-1])
             discounted_rewards.insert(0, R)
 
-        discounted_rewards_tensor = torch.tensor(discounted_rewards).to("cuda:0")
+        discounted_rewards_tensor = torch.tensor(discounted_rewards).to(self.device)
 
         # Normalize the rewards
         advantages = discounted_rewards_tensor - discounted_rewards_tensor.mean()
