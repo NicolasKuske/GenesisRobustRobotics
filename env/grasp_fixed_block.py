@@ -115,7 +115,6 @@ class GraspFixedBlockEnv:
         dones = block_position[:, 2] > 0.35
         return states, rewards, dones
 
-
 if __name__ == "__main__":
     gs.init(backend=gs.gpu, precision="32")
     env = GraspFixedBlockEnv(vis=True)

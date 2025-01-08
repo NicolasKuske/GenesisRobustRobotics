@@ -30,10 +30,16 @@ def train_dqn(args):
     except ValueError as e:
         print(e)
     agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim)
+    if args.device == "mps":
+        gs.tools.run_in_another_thread(fn=run, args=(env, agent, checkpoint_path))
+        env.scene.viewer.start()
+    else:
+        run(env, agent, checkpoint_path)
+
+def run(env, agent, checkpoint_path):
     num_episodes = 500
     batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
     target_update_interval = 10
-
     for episode in range(num_episodes):
         state = env.reset()
         total_reward = torch.zeros(env.num_envs).to(args.device)
