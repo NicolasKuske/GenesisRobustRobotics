@@ -20,7 +20,6 @@ def create_environment(task_name):
     else:
         raise ValueError(f"Task '{task_name}' is not recognized.")
 
-
 def train_ppo(args):
     checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)

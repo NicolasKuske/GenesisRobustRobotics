@@ -31,7 +31,7 @@ class DQNAgent:
         print(f"Checkpoint saved to {file_path}")
     
     def load_checkpoint(self, file_path):
-        checkpoint = torch.load(file_path)
+        checkpoint = torch.load(file_path, map_location=torch.device(self.device))
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
         self.model.eval()
