@@ -21,14 +21,19 @@ def create_environment(task_name):
         raise ValueError(f"Task '{task_name}' is not recognized.")
 
 def train_ppo(args):
-    checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
+    load = False
+    if args.load_path: 
+        load = True
+        checkpoint_path = args.load_path
+    else:
+        checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     try:
         env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
-    agent = PPOAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim, checkpoint_path=checkpoint_path)
+    agent = PPOAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=load, num_envs=args.num_envs, hidden_dim=args.hidden_dim, checkpoint_path=checkpoint_path)
     if args.device == "mps":
         gs.tools.run_in_another_thread(fn=run, args=(env, agent))
         env.scene.viewer.start()
@@ -70,7 +75,7 @@ def run(env, agent):
 def arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--vis", action="store_true", default=False, help="Enable visualization") 
-    parser.add_argument("-l", "--load", action="store_true", default=False, help="Load model from checkpoint") 
+    parser.add_argument("-l", "--load_path", type=str, nargs='?', default=None, help="Path for loading model from checkpoint") 
     parser.add_argument("-n", "--num_envs", type=int, default=1, help="Number of environments to create") 
     parser.add_argument("-b", "--batch_size", type=int, default=None, help="Batch size for training")
     parser.add_argument("-hd", "--hidden_dim", type=int, default=64, help="Hidden dimension for the network")
