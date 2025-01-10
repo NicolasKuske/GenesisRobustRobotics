@@ -34,7 +34,11 @@ def train_dqn(args):
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
-    agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, device=args.device, load=load, num_envs=args.num_envs, hidden_dim=args.hidden_dim, checkpoint_path=checkpoint_path)
+    batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
+    replay_size = args.replay_size if args.replay_size else max(100000, 10 * batch_size) 
+    agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, \
+                     device=args.device, load=load, num_envs=args.num_envs, hidden_dim=args.hidden_dim, \
+                        checkpoint_path=checkpoint_path, batch_size=batch_size, replay_size=replay_size)
     if args.device == "mps":
         gs.tools.run_in_another_thread(fn=run, args=(env, agent))
         env.scene.viewer.start()
@@ -43,7 +47,6 @@ def train_dqn(args):
 
 def run(env, agent):
     num_episodes = 500
-    batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
     target_update_interval = 10
     for episode in range(num_episodes):
         state = env.reset()
@@ -53,7 +56,7 @@ def run(env, agent):
             action = agent.select_action(state)
             next_state, reward, done = env.step(action)
             agent.memory.add(state, action, reward, next_state, done)
-            agent.train(batch_size)
+            agent.train()
 
             state = next_state
             total_reward += reward
@@ -72,6 +75,7 @@ def arg_parser():
     parser.add_argument("-l", "--load_path", type=str, nargs='?', default=None, help="Path for loading model from checkpoint") 
     parser.add_argument("-n", "--num_envs", type=int, default=1, help="Number of environments to create") 
     parser.add_argument("-b", "--batch_size", type=int, default=None, help="Batch size for training")
+    parser.add_argument("-r", "--replay_size", type=int, default=None, help="Size of replay buffer for DQN")
     parser.add_argument("-hd", "--hidden_dim", type=int, default=64, help="Hidden dimension for the network")
     parser.add_argument("-t", "--task", type=str, default="GraspFixedBlock", help="Task to train on")
     parser.add_argument("-d", "--device", type=str, default="cuda", help="device: cpu or cuda:x or mps for macos")
