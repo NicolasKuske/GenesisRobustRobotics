@@ -32,7 +32,7 @@ class GraspFixedRodEnv:
         )
         self.cube = self.scene.add_entity(
             gs.morphs.Box(
-                size=(0.4, 0.04, 0.04), # long rod
+                size=(0.2, 0.04, 0.04), # long rod
                 pos=(0.65, 0.0, 0.02),
             )
         )
