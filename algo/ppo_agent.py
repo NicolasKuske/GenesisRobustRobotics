@@ -6,29 +6,30 @@ import argparse
 from network.ppo import PPO
 
 class PPOAgent:
-    def __init__(self, input_dim, output_dim, lr, gamma, clip_epsilon, device, load=False, num_envs=1, hidden_dim=64):
+    def __init__(self, input_dim, output_dim, lr, gamma, clip_epsilon, device, load=False, num_envs=1, hidden_dim=64, checkpoint_path=None):
         self.device = device
         self.num_envs = num_envs
         self.model = PPO(input_dim, output_dim, hidden_dim).to(self.device)
+        self.checkpoint_path = checkpoint_path
         if load: 
-            self.load_checkpoint("logs/ppo_checkpoint.pth")
+            self.load_checkpoint()
             print("Loaded model from checkpoint")
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
 
-    def save_checkpoint(self, file_path):
+    def save_checkpoint(self):
         checkpoint = {
             'model_state_dict': self.model.state_dict()
         }
-        torch.save(checkpoint, file_path)
-        print(f"Checkpoint saved to {file_path}")
+        torch.save(checkpoint, self.checkpoint_path)
+        print(f"Checkpoint saved to {self.checkpoint_path}")
 
-    def load_checkpoint(self, file_path):
-        checkpoint = torch.load(file_path)
+    def load_checkpoint(self):
+        checkpoint = torch.load(self.checkpoint_path, map_location=torch.device(self.device))
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model.eval()
-        print(f"Checkpoint loaded from {file_path}")
+        print(f"Checkpoint loaded from {self.checkpoint_path}")
 
     def select_action(self, state):
         with torch.no_grad():

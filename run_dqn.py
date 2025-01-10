@@ -29,14 +29,14 @@ def train_dqn(args):
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
-    agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim)
+    agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim, checkpoint_path=checkpoint_path)
     if args.device == "mps":
-        gs.tools.run_in_another_thread(fn=run, args=(env, agent, checkpoint_path))
+        gs.tools.run_in_another_thread(fn=run, args=(env, agent))
         env.scene.viewer.start()
     else:
-        run(env, agent, checkpoint_path)
+        run(env, agent)
 
-def run(env, agent, checkpoint_path):
+def run(env, agent):
     num_episodes = 500
     batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
     target_update_interval = 10
@@ -58,7 +58,7 @@ def run(env, agent, checkpoint_path):
 
         if episode % target_update_interval == 0:
             agent.update_target_network()
-            agent.save_checkpoint(checkpoint_path)
+            agent.save_checkpoint()
         print(f"Episode {episode}, Total Reward: {total_reward}")
 
 def arg_parser():
@@ -69,7 +69,7 @@ def arg_parser():
     parser.add_argument("-b", "--batch_size", type=int, default=None, help="Batch size for training")
     parser.add_argument("-hd", "--hidden_dim", type=int, default=64, help="Hidden dimension for the network")
     parser.add_argument("-t", "--task", type=str, default="GraspFixedBlock", help="Task to train on")
-    parser.add_argument("-d", "--device", type=str, default="cpu", help="device: cpu or cuda:x or mps for macos")
+    parser.add_argument("-d", "--device", type=str, default="cuda", help="device: cpu or cuda:x or mps for macos")
 
     args = parser.parse_args()
     return args
