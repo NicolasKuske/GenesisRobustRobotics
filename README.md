@@ -3,7 +3,8 @@ This repository contains example RL environment for Genesis general-purpose phys
 
 ## 🔥 News
 
-- [2025-01-08] Support [**MacOS**](#MacOS-Usage) training and visualization! 🎉
+- [2025-01-10] Added successfully trained [checkpoints](https://github.com/RochelleNi/GenesisEnvs/tree/master/logs) for `GraspFixedBlock` and `GraspFixedRod`! 
+- [2025-01-08] Supported [**MacOS**](#MacOS-Usage) training and visualization! 🎉
   
 ## Requirements
 All necessary dependencies have been listed in `requirements.txt`.
