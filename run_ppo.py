@@ -28,7 +28,7 @@ def train_ppo(args):
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
-    agent = PPOAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim)
+    agent = PPOAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=args.load, num_envs=args.num_envs, hidden_dim=args.hidden_dim, checkpoint_path=checkpoint_path)
     if args.device == "mps":
         gs.tools.run_in_another_thread(fn=run, args=(env, agent))
         env.scene.viewer.start()

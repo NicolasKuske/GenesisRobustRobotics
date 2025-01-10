@@ -62,12 +62,12 @@ def save_checkpoint(self, file_path):
 ```
 You can load a checkpoint by setting the `--load` flag. We've provided a successfully trained checkpoint `dqn_checkpoint.pth` for a Franka robot to grasp a block, which you can use for evaluation.
 ```python
-    def load_checkpoint(self, file_path):
-        checkpoint = torch.load(file_path)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
-        self.model.eval()
-        self.target_model.eval()
+def load_checkpoint(self, file_path):
+    checkpoint = torch.load(file_path)
+    self.model.load_state_dict(checkpoint['model_state_dict'])
+    self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
+    self.model.eval()
+    self.target_model.eval()
 ```
 
 ## MacOS Usage
