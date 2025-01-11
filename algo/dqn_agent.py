@@ -6,7 +6,7 @@ from network.dqn import DQN
 from .replay_buffer import ReplayBuffer
 
 class DQNAgent:
-    def __init__(self, input_dim, output_dim, lr, gamma, epsilon, epsilon_decay, epsilon_min, device, load=False, num_envs=1, hidden_dim=64, checkpoint_path=None):
+    def __init__(self, input_dim, output_dim, lr, gamma, epsilon, epsilon_decay, epsilon_min, device, load=False, num_envs=1, hidden_dim=64, checkpoint_path=None, batch_size=None, replay_size=None):
         self.device = device
         self.num_envs = num_envs
         self.model = DQN(input_dim, output_dim, hidden_dim).to(self.device)
@@ -21,7 +21,9 @@ class DQNAgent:
         self.epsilon = epsilon if not load else 0
         self.epsilon_decay = epsilon_decay
         self.epsilon_min = epsilon_min
-        self.memory = ReplayBuffer(100000, state_dim=input_dim, action_dim=1, device=self.device)
+        self.batch_size = batch_size
+        self.replay_size = replay_size
+        self.memory = ReplayBuffer(replay_size, state_dim=input_dim, action_dim=1, device=self.device)
     
     def save_checkpoint(self):
         checkpoint = {
@@ -50,11 +52,11 @@ class DQNAgent:
         actions = torch.where(mask, random_action, greedy_action)
         return actions
 
-    def train(self, batch_size):
-        if self.memory.size < batch_size: # 1 -> 64
+    def train(self):
+        if self.memory.size < self.batch_size: # 1 -> 64
             return
 
-        states, actions, rewards, next_states, dones = self.memory.sample(batch_size)
+        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
         q_values = self.model(states)
         next_q_values = self.target_model(next_states)
         target_q_values = q_values.clone()

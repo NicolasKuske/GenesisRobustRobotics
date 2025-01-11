@@ -67,8 +67,8 @@ class GraspRandomRodEnv:
         self.build_env()
         ## random cube position
         cube_pos = np.array([0.65, 0.0, 0.02])
-        x_min, x_max = 0.2, 0.6  
-        y_min, y_max = 0.2, 0.6  
+        x_min, x_max = 0.64, 0.66  
+        y_min, y_max = -0.01, 0.01  
         random_x = np.random.uniform(x_min, x_max, size=self.num_envs)
         random_y = np.random.uniform(y_min, y_max, size=self.num_envs)
         cube_pos = np.column_stack((random_x, random_y, np.full(self.num_envs, cube_pos[2])))

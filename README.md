@@ -1,6 +1,11 @@
 # Genesis Environment
 This repository contains example RL environment for Genesis general-purpose physics platform.
 
+## 🔥 News
+
+- [2025-01-10] Added successfully trained [checkpoints](https://github.com/RochelleNi/GenesisEnvs/tree/master/logs) for `GraspFixedBlock` and `GraspFixedRod`! 
+- [2025-01-08] Supported [**MacOS**](#MacOS-Usage) training and visualization! 🎉
+  
 ## Requirements
 All necessary dependencies have been listed in `requirements.txt`.
 You can create a conda environment by:
@@ -12,7 +17,7 @@ conda create --name genesis_env --file requirements.txt
 ## Command-line Arguments
 
 - `-v` or `--vis` enables visualization.
-- `-l` or `--load` loads the model from a checkpoint.
+- `-l` or `--load_path` specifies the loading path of a previously saved model checkpoint. Do **not** include this argument if you intend to train your model from scratch. If only the `-l` option is provided, the default loading path will be: `logs/{task}_{algo}_checkpoint.pth`.
 - `-n` or `--num_envs` specifies the number of parallel environments. If none is provided, the default is `1`.
 - `-b` or `--batch_size` defines the batch size used for training. If none is provided, the default is `64 * num_envs`.
 - `-r` or `--replay_size` defines the size of replay buffer for DQN. If none is provided, the default is `10 * batch_size`.
@@ -61,12 +66,25 @@ def save_checkpoint(self, file_path):
 ```
 You can load a checkpoint by setting the `--load` flag. We've provided a successfully trained checkpoint `dqn_checkpoint.pth` for a Franka robot to grasp a block, which you can use for evaluation.
 ```python
-    def load_checkpoint(self, file_path):
-        checkpoint = torch.load(file_path)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
-        self.model.eval()
-        self.target_model.eval()
+def load_checkpoint(self, file_path):
+    checkpoint = torch.load(file_path)
+    self.model.load_state_dict(checkpoint['model_state_dict'])
+    self.target_model.load_state_dict(checkpoint['target_model_state_dict'])
+    self.model.eval()
+    self.target_model.eval()
 ```
 
+## MacOS Usage
+- Training
 
+You can add `-d mps` to train:
+```bash
+python run_dqn.py -n 10 -d mps
+```
+
+- Evaluation
+
+You can add `-d mps` to eval and visualization:
+```bash
+python run_dqn.py -l -v -n 1 -t GraspFixedBlock -d mps
+```
