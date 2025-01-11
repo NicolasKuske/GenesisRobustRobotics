@@ -22,12 +22,15 @@ def create_environment(task_name):
 
 
 def train_dqn(args):
-    load = False
-    if args.load_path: 
+    if args.load_path == "default":
+        load = True
+        checkpoint_path = f"logs/{args.task}_dqn_checkpoint.pth"
+    elif args.load_path: 
         load = True
         checkpoint_path = args.load_path
     else:
-        checkpoint_path = f"logs/{args.task}_dqn_checkpoint.pth"
+        load = False
+        checkpoint_path = None
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     try:
         env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
