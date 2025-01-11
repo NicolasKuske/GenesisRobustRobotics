@@ -29,7 +29,7 @@ def train_ppo(args):
         checkpoint_path = args.load_path
     else:
         load = False
-        checkpoint_path = None
+        checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     try:
         env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
