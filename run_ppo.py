@@ -11,7 +11,8 @@ task_to_class = {
     'GraspFixedBlock': GraspFixedBlockEnv,
     'GraspFixedRod': GraspFixedRodEnv,
     'GraspRandomBlock': GraspRandomBlockEnv,
-    'GraspRandomRod': GraspRandomRodEnv
+    'GraspRandomRod': GraspRandomRodEnv,
+    'ShadowHandBase': ShadowHandBaseEnv
 }
 
 def create_environment(task_name):
@@ -36,7 +37,7 @@ def train_ppo(args):
         print(f"Created environment: {env}")
     except ValueError as e:
         print(e)
-    agent = PPOAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=load, \
+    agent = PPOAgent(input_dim=env.state_dim, output_dim=env.action_space, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=load, \
                      num_envs=args.num_envs, hidden_dim=args.hidden_dim, checkpoint_path=checkpoint_path)
     if args.device == "mps":
         gs.tools.run_in_another_thread(fn=run, args=(env, agent))

@@ -39,7 +39,7 @@ def train_dqn(args):
         print(e)
     batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
     replay_size = args.replay_size if args.replay_size else max(100000, 10 * batch_size) 
-    agent = DQNAgent(input_dim=6, output_dim=8, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, \
+    agent = DQNAgent(input_dim=env.state_dim, output_dim=env.action_space, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, \
                      device=args.device, load=load, num_envs=args.num_envs, hidden_dim=args.hidden_dim, \
                         checkpoint_path=checkpoint_path, batch_size=batch_size, replay_size=replay_size)
     if args.device == "mps":
