@@ -17,7 +17,7 @@ conda create --name genesis_env --file requirements.txt
 ## Command-line Arguments
 
 - `-v` or `--vis` enables visualization.
-- `-l` or `--load_path` specifies the loading path of a previously saved model checkpoint. Do **not** include this argument if you intend to train your model from scratch. If only `-l default` is provided, the default loading path will be: `logs/{task}_{algo}_checkpoint.pth`.
+- `-l` or `--load_path` specifies the loading path of a previously saved model checkpoint. Do **not** include this argument if you intend to train your model from scratch. If only `-l default` is provided, the default loading path will be: `logs/{task}_{algo}_checkpoint_released.pth`.
 - `-n` or `--num_envs` specifies the number of parallel environments. If none is provided, the default is `1`.
 - `-b` or `--batch_size` defines the batch size used for training. If none is provided, the default is `64 * num_envs`.
 - `-r` or `--replay_size` defines the size of replay buffer for DQN. If none is provided, the default is `10 * batch_size`.
@@ -64,7 +64,7 @@ def save_checkpoint(self, file_path):
     }
     torch.save(checkpoint, file_path)
 ```
-You can load a checkpoint by setting the `--load` flag. We've provided a successfully trained checkpoint `dqn_checkpoint.pth` for a Franka robot to grasp a block, which you can use for evaluation.
+You can load a checkpoint by setting the `--load` flag. We've provided a successfully trained checkpoint `logs/{task}_{algo}_checkpoint_released.pth` for a Franka robot to grasp a block, which you can use for evaluation.
 ```python
 def load_checkpoint(self, file_path):
     checkpoint = torch.load(file_path)

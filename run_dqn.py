@@ -24,7 +24,7 @@ def create_environment(task_name):
 def train_dqn(args):
     if args.load_path == "default":
         load = True
-        checkpoint_path = f"logs/{args.task}_dqn_checkpoint.pth"
+        checkpoint_path = f"logs/{args.task}_dqn_checkpoint_released.pth"
     elif args.load_path: 
         load = True
         checkpoint_path = args.load_path
