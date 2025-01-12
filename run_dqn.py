@@ -20,7 +20,6 @@ def create_environment(task_name):
     else:
         raise ValueError(f"Task '{task_name}' is not recognized.")
 
-
 def train_dqn(args):
     if args.load_path == "default":
         load = True
@@ -32,11 +31,10 @@ def train_dqn(args):
         load = False
         checkpoint_path = f"logs/{args.task}_dqn_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-    try:
-        env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
-        print(f"Created environment: {env}")
-    except ValueError as e:
-        print(e)
+    
+    env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
+    print(f"Created environment: {env}")
+    
     batch_size = args.batch_size if args.batch_size else 64 * args.num_envs
     replay_size = args.replay_size if args.replay_size else max(100000, 10 * batch_size) 
     agent = DQNAgent(input_dim=env.state_dim, output_dim=env.action_space, lr=1e-3, gamma=0.99, epsilon=0.5, epsilon_decay=0.995, epsilon_min=0.01, \

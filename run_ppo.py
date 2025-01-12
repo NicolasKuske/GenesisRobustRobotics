@@ -32,11 +32,10 @@ def train_ppo(args):
         load = False
         checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-    try:
-        env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
-        print(f"Created environment: {env}")
-    except ValueError as e:
-        print(e)
+    
+    env = create_environment(args.task)(vis=args.vis, device=args.device, num_envs=args.num_envs)
+    print(f"Created environment: {env}")
+    
     agent = PPOAgent(input_dim=env.state_dim, output_dim=env.action_space, lr=1e-3, gamma=0.99, clip_epsilon=0.2, device=args.device, load=load, \
                      num_envs=args.num_envs, hidden_dim=args.hidden_dim, checkpoint_path=checkpoint_path)
     if args.device == "mps":
