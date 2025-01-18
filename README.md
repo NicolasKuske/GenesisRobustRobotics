@@ -28,7 +28,8 @@ conda create --name genesis_env --file requirements.txt
   - `GraspFixedRod`: Environment for grasping a fixed rod.
   - `GraspRandomBlock`: Environment for grasping a randomly placed block.
   - `GraspRandomRod`: Environment for grasping a randomly placed rod.
-  - `WaterFranka`: Environment for playing with liquid.
+  - `ShadowHandBase`: Environment for controlling a ShadowHand.
+  - `WaterFranka`: Environment for interacting with liquid.
 
 
 

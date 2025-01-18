@@ -9,9 +9,6 @@ class ShadowHandBaseEnv:
         self.action_space = 30
         self.state_dim = 78
 
-        ########################## init ##########################
-        gs.init(seed=0, precision="32", logging_level="debug")
-
         ########################## create a scene ##########################
         self.scene = gs.Scene(
             viewer_options=gs.options.ViewerOptions(
@@ -97,6 +94,9 @@ class ShadowHandBaseEnv:
         return torch.zeros([self.num_envs], device=self.device)
 
 if __name__ == "__main__":
-    env = ShadowHandBaseEnv(vis=True, device="mps")
+    gs.init(seed=0, precision="32", logging_level="debug")
+    device = "cuda" if torch.cuda.is_available() else "mps"
+    env = ShadowHandBaseEnv(vis=True, device=device)
     obs = env.reset()
-    obs, rewards, dones = env.step(torch.zeros([1, 30], device='mps'))
+    for i in range(1000):
+        obs, rewards, dones = env.step(torch.zeros([1, 30], device=device))
