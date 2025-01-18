@@ -11,7 +11,8 @@ task_to_class = {
     'GraspFixedBlock': GraspFixedBlockEnv,
     'GraspFixedRod': GraspFixedRodEnv,
     'GraspRandomBlock': GraspRandomBlockEnv,
-    'GraspRandomRod': GraspRandomRodEnv
+    'GraspRandomRod': GraspRandomRodEnv,
+    'WaterFranka': WaterFrankaEnv
 }
 
 def create_environment(task_name):
@@ -19,6 +20,7 @@ def create_environment(task_name):
         return task_to_class[task_name]  
     else:
         raise ValueError(f"Task '{task_name}' is not recognized.")
+
 
 def train_dqn(args):
     if args.load_path == "default":

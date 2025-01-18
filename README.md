@@ -3,6 +3,7 @@ This repository contains example RL environment for Genesis general-purpose phys
 
 ## 🔥 News
 
+- [2025-01-18] Added a new `WaterFranka` environment to play with liquid! 
 - [2025-01-10] Added successfully trained [checkpoints](https://github.com/RochelleNi/GenesisEnvs/tree/master/logs) for `GraspFixedBlock`, `GraspFixedRod` and `GraspRandomBlock`! 
 - [2025-01-08] Supported [**MacOS**](#MacOS-Usage) training and visualization! 🎉
   
@@ -27,6 +28,7 @@ conda create --name genesis_env --file requirements.txt
   - `GraspFixedRod`: Environment for grasping a fixed rod.
   - `GraspRandomBlock`: Environment for grasping a randomly placed block.
   - `GraspRandomRod`: Environment for grasping a randomly placed rod.
+  - `WaterFranka`: Environment for playing with liquid.
 
 
 
@@ -51,6 +53,15 @@ python run_{algo}.py -l -v -n 1 -t GraspFixedBlock
 Similarly, you can specify `algo` as you like.
 
 <img  src="figs/eval.gif" width="300">
+
+- Liquid
+
+Apart from rigid bodies, you can also play with the `WaterFranka` environment to interact with liquid.
+```bash
+python run_dqn.py -v -n 1 -t WaterFranka
+```
+
+<img src="figs/water.gif" width="300">
 
 ## Saving and Loading Checkpoints
 
