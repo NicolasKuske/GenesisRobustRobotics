@@ -51,7 +51,7 @@ class PPOAgent:
             R = reward + self.gamma * R * (~dones[-1])
             discounted_rewards.insert(0, R)
 
-        discounted_rewards_tensor = torch.tensor(discounted_rewards).to(self.device)
+        discounted_rewards_tensor = torch.stack(discounted_rewards).to(self.device)
 
         # Normalize the rewards
         advantages = discounted_rewards_tensor - discounted_rewards_tensor.mean()
