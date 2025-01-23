@@ -1,5 +1,5 @@
 # Genesis Environment
-This repository contains example RL environment for Genesis general-purpose physics platform.
+This repository contains **parallelized** RL environment for Genesis general-purpose physics platform.
 
 ## 🔥 News
 
