@@ -66,7 +66,6 @@ def run(env, agent):
             state = next_state
             total_reward += reward
             done_array = torch.logical_or(done_array, done)
-
             if done_array.all():
                 break
 
