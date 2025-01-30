@@ -114,8 +114,6 @@ class ShadowHandBaseEnv:
         ], device=self.device)  # shape: [6, 3]
         target_delta = action_directions[actions]  # shape: [num_envs, 3]
         current_pos = self.shadow_hand.get_dofs_position() # shape: [num_envs, 30]
-        current_root_pos = self.shadow_hand.get_pos()
-        print(current_pos, current_root_pos)
         pos_target = current_pos 
         pos_target[:, :3] += target_delta
         self.shadow_hand.control_dofs_position(pos_target, torch.arange(current_pos.shape[-1]).to(self.device), self.envs_idx)
