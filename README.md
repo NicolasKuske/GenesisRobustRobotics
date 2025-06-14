@@ -1,19 +1,25 @@
-# Genesis Environment
-This repository contains **parallelized** RL environment for Genesis general-purpose physics platform.
+# Robust Multimodal Continual Learning for Robotics
+
+This repository contains RL environments using the Genesis general-purpose physics platform to test multimodal continual learning
+
 
 ## 🔥 News
 
-- [2025-01-18] Added a new `WaterFranka` environment to play with liquid! 
-- [2025-01-10] Added successfully trained [checkpoints](https://github.com/RochelleNi/GenesisEnvs/tree/master/logs) for `GraspFixedBlock`, `GraspFixedRod` and `GraspRandomBlock`! 
-- [2025-01-08] Supported [**MacOS**](#MacOS-Usage) training and visualization! 🎉
+- [2025-06-14] Focus on the bare necessities
+- [2025-06-13] Set up the repository
+
   
 ## Requirements
-All necessary dependencies have been listed in `requirements.txt`.
-You can create a conda environment by:
 
-```bash
-conda create --name genesis_env --file requirements.txt
+Please install Pytorch.
+
+
+You get the Genesis dependencies via: 
 ```
+pip install genesis-world
+```
+That's it for now!
+
 
 ## Command-line Arguments
 
@@ -25,11 +31,7 @@ conda create --name genesis_env --file requirements.txt
 - `-hd` or `--hidden_dim` sets the hidden dimension for the network. If none is provided, the default is `64`.
 - `-t` or `--task` specifies the task to train on. If none is provided, the default is `GraspFixedBlock`. Available tasks include:
   - `GraspFixedBlock`: Environment for grasping a fixed block.
-  - `GraspFixedRod`: Environment for grasping a fixed rod.
   - `GraspRandomBlock`: Environment for grasping a randomly placed block.
-  - `GraspRandomRod`: Environment for grasping a randomly placed rod.
-  - `ShadowHandBase`: Environment for controlling a ShadowHand.
-  - `WaterFranka`: Environment for interacting with liquid.
 
 
 
@@ -41,7 +43,7 @@ You can run different learning algorithms with the following command structure. 
 ```bash
 python run_{algo}.py -n 10
 ```
-where `algo` can be `dqn`, `ppo` or `heuristic`.
+where `algo` is currently limited to `ppo`, but will include more soon.
 
 <img  src="figs/train.gif" width="300">
 
@@ -55,14 +57,6 @@ Similarly, you can specify `algo` as you like.
 
 <img  src="figs/eval.gif" width="300">
 
-- Liquid
-
-Apart from rigid bodies, you can also play with the `WaterFranka` environment to interact with liquid.
-```bash
-python run_dqn.py -v -n 1 -t WaterFranka
-```
-
-<img src="figs/water.gif" width="300">
 
 ## Saving and Loading Checkpoints
 
@@ -87,6 +81,7 @@ def load_checkpoint(self, file_path):
 ```
 
 ## MacOS Usage
+
 - Training
 
 You can add `-d mps` to train:
