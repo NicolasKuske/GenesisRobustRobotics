@@ -1,9 +1,3 @@
-
-#these two lines are for the viewer on ubuntu
-import os
-os.environ['PYOPENGL_PLATFORM'] = 'glx'
-
-
 import argparse
 import genesis as gs
 import torch
@@ -11,11 +5,12 @@ from algo.ppo_agent import PPOAgent
 from env import *
 import os
 
-
-#dict to match task name parsed in when calling script to the task environment class - defaults to fixed block
 task_to_class = {
     'GraspFixedBlock': GraspFixedBlockEnv,
-    'GraspRandomBlock': GraspRandomBlockEnv
+    'GraspFixedRod': GraspFixedRodEnv,
+    'GraspRandomBlock': GraspRandomBlockEnv,
+    'GraspRandomRod': GraspRandomRodEnv,
+    'ShadowHandBase': ShadowHandBaseEnv
 }
 
 def create_environment(task_name):
@@ -24,12 +19,7 @@ def create_environment(task_name):
     else:
         raise ValueError(f"Task '{task_name}' is not recognized.")
 
-
-
-
-
 def train_ppo(args):
-
     # determine checkpoint loading
     if args.load_path == "default":
         load = True
@@ -42,12 +32,12 @@ def train_ppo(args):
         checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
-    # create task simulation environment(s)
+    # create environment
     env_cls = create_environment(args.task)
     env = env_cls(vis=args.vis, device=args.device, num_envs=args.num_envs)
     print(f"Created environment: {env}")
 
-    # set agent parameters
+    # build agent
     agent = PPOAgent(
         input_dim=env.state_dim,
         output_dim=env.action_space,
@@ -61,14 +51,12 @@ def train_ppo(args):
         checkpoint_path=checkpoint_path
     )
 
-    # run training loop, with special case for MPS (MacOS)
+    # run training loop, with special case for MPS
     if args.device.lower() == "mps":
         gs.tools.run_in_another_thread(fn=run, args=(env, agent, args))
         env.scene.viewer.start()
     else:
         run(env, agent, args)
-
-
 
 def run(env, agent, args):
     num_episodes = 500
@@ -102,10 +90,7 @@ def run(env, agent, args):
             agent.save_checkpoint()
         print(f"Episode {episode}, Total Reward: {total_reward}")
 
-
-
 def arg_parser():
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-v", "--vis",
@@ -144,8 +129,6 @@ def arg_parser():
     )
     return parser.parse_args()
 
-
-
 def main():
     args = arg_parser()
 
@@ -158,11 +141,9 @@ def main():
     else:
         backend = gs.gpu
 
-    gs.init(backend=backend, theme='light')
+    gs.init(backend=backend, precision="32")
 
     train_ppo(args)
-
-
 
 if __name__ == "__main__":
     main()

@@ -115,6 +115,7 @@ class GraspFixedBlockEnv:
         dones = block_position[:, 2] > 0.35
         return states, rewards, dones
 
+#main guard, preventing the init and env to be called when the module is imported as module instead of run alone (as "main" script)
 if __name__ == "__main__":
-    gs.init(backend=gs.gpu, precision="32")
+    gs.init(backend=gs.gpu)
     env = GraspFixedBlockEnv(vis=True)
