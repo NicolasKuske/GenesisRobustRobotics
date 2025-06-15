@@ -1,2 +1,2 @@
-from .grasp_fixed_block import GraspFixedBlockEnv
-from .grasp_random_block import GraspRandomBlockEnv
+from .grasp_fixed_cube import GraspFixedCubeEnv
+from .grasp_random_cube import GraspRandomCubeEnv
