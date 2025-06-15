@@ -1,8 +1,9 @@
 import numpy as np
 import genesis as gs
 import torch
+from .util import euler_to_quaternion
 
-class GraspFixedBlockEnv:
+class GraspRandomCubeEnv:
     def __init__(self, vis, device, num_envs=1):
         self.device = device
         self.action_space = 8  
@@ -32,7 +33,7 @@ class GraspFixedBlockEnv:
         )
         self.cube = self.scene.add_entity(
             gs.morphs.Box(
-                size=(0.04, 0.04, 0.04), # block
+                size=(0.04, 0.04, 0.04),
                 pos=(0.65, 0.0, 0.02),
             )
         )
@@ -64,10 +65,20 @@ class GraspFixedBlockEnv:
 
     def reset(self):
         self.build_env()
-        # fixed cube position
+        ## random cube position
         cube_pos = np.array([0.65, 0.0, 0.02])
-        cube_pos = np.repeat(cube_pos[np.newaxis], self.num_envs, axis=0)
-        self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
+        x_min, x_max = 0.64, 0.66  
+        y_min, y_max = -0.01, 0.01  
+        random_x = np.random.uniform(x_min, x_max, size=self.num_envs)
+        random_y = np.random.uniform(y_min, y_max, size=self.num_envs)
+        cube_pos = np.column_stack((random_x, random_y, np.full(self.num_envs, cube_pos[2])))
+        ## random cube orientation
+        fixed_roll = 0
+        fixed_pitch = 0
+        random_yaws = np.random.uniform(0, 2 * np.pi, size=self.num_envs) 
+        quaternions = np.array([euler_to_quaternion(fixed_roll, fixed_pitch, yaw) for yaw in random_yaws])
+        self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)   
+        self.cube.set_quat(quaternions, envs_idx=self.envs_idx) 
 
         obs1 = self.cube.get_pos()
         obs2 = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos()) / 2 
@@ -115,7 +126,7 @@ class GraspFixedBlockEnv:
         dones = block_position[:, 2] > 0.35
         return states, rewards, dones
 
-#main guard, preventing the init and env to be called when the module is imported as module instead of run alone (as "main" script)
+
 if __name__ == "__main__":
-    gs.init(backend=gs.gpu)
-    env = GraspFixedBlockEnv(vis=True)
+    gs.init(backend=gs.gpu, precision="32")
+    env = GraspRandomCubeEnv(vis=True)
