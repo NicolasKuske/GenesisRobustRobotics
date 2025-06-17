@@ -3,7 +3,6 @@
 import numpy as np
 import genesis as gs
 import torch
-import math
 
 class GraspFixedCubeEnv:
 
@@ -12,10 +11,8 @@ class GraspFixedCubeEnv:
         self.device     = device
         self.num_envs   = num_envs
 
-        # now our “state” is the camera image:
-        # we’re using a 120×120 RGB camera
-        self.obs_shape = (3, 120, 120)
-        self.action_space = 6
+        self.state_dim    = 6  # input dimension: [cube_xyz, gripper_xyz]
+        self.action_space = 6  # output dimension: ±x, ±y, ±z
 
         self.scene = gs.Scene(
             #show_FPS=False,  # Don't show simulation speed
@@ -41,44 +38,7 @@ class GraspFixedCubeEnv:
             )
         )
 
-        ##### cam #### attaching cams does not work for parallelized scenes yet, so we manually link cam to arm position below
-        self.cams = []
-        env_space = 5.0  # must match your scene.build(env_spacing=(5.0,5.0))
-
-        M = int(math.sqrt(self.num_envs))
-        assert M * M == self.num_envs, "num_envs must be a perfect square for an M×M grid"
-
-        for idx in range(self.num_envs):
-            # compute row, col in M×M
-            row = idx // M
-            col = idx % M
-
-            # center the grid at (0,0)
-            x_off = (col - (M - 1) / 2) * env_space
-            y_off = (row - (M - 1) / 2) * env_space
-
-            cam = self.scene.add_camera(
-                res=(120, 120),
-                pos=(2.5 + x_off, 0.5 + y_off, 2.5),
-                lookat=(x_off, y_off, 0.2),
-                fov=30,
-                GUI=False,
-            )
-            self.cams.append(cam)
-
-        #T = np.eye(4)
-        # Define Rx 180° rotation matrix - rotates around the x-axis in the direction away from the robot
-        #Rx_180 = np.array([
-        #    [1, 0, 0],
-        #    [0, -1, 0],
-        #    [0, 0, -1]
-        #])
-        #T[:3, :3] = Rx_180
-        #T[:3, 3] = np.array([0.05, 0.0, 0.0])  # each link has a different wire frame which can be observed in the scene view window (press l)
-        # for the hand link the z axis goes out upward, and the x axis orthogonal to arm direction outward (foward in x direction)
-
-
-        self.scene.build(n_envs=self.num_envs, env_spacing=(env_space, env_space)) #only space envs in x direction
+        self.scene.build(n_envs=self.num_envs)
         self.envs_idx = np.arange(self.num_envs)
 
         # (Re)position robot to a default “ready” pose
@@ -90,11 +50,6 @@ class GraspFixedCubeEnv:
         # extract initial Cartesian target and orientation from home pose for reset
         self.pos  = self.end_effector.get_pos().clone()   # (num_envs×3)
         self.quat = self.end_effector.get_quat().clone()  # (num_envs×4)
-
-        # add camera and start recording
-
-        for cam in self.cams:
-            cam.start_recording()
 
 
     # (Re)position robot to a default “ready” pose
@@ -117,9 +72,6 @@ class GraspFixedCubeEnv:
         franka_pos = franka_pos.unsqueeze(0).repeat(self.num_envs, 1)
 
         self.franka.set_qpos(franka_pos, envs_idx=self.envs_idx)
-
-
-
         self.scene.step()
 
 
@@ -135,21 +87,9 @@ class GraspFixedCubeEnv:
         cube_pos = np.repeat(cube_pos[np.newaxis], self.num_envs, axis=0)
         self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
 
-        #print (f"\n [INFO] shape of cam.render: {self.cam.render()[0]}\n") #show image in viewer
-
-        # render & read a fresh frame
-        #frame = self.cam.render()[0]  # extract RGB image only  # shape (120,120,3), uint8
-        # to torch tensor, CHW, normalized to [0,1]
-        #img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
-        #state = img.repeat(self.num_envs, 1, 1, 1)  # shape: (num_envs, 3, 120, 120) #unimodal state (to have the number of env. also)
-
-        states = []
-        for cam in self.cams:
-            frame = cam.render()[0]
-            img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
-            states.append(img)
-        state = torch.stack(states, dim=0)  # (num_envs, 3, 120, 120)
-
+        obs1 = self.cube.get_pos()
+        obs2 = self.end_effector.get_pos()
+        state = torch.concat([obs1, obs2], dim=1)
         return state
 
 
@@ -182,37 +122,13 @@ class GraspFixedCubeEnv:
 
 
         # 4) command the arm joints, keep the gripper position constant, then step the sim
-        self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof)# self.envs_idx)
-
-
-        #link = self.franka.get_link("hand")
-        #link_T = link.get_transform()  # torch.Tensor, shape: (num_envs, 4, 4)
-        #print("link_T.shape=", link_T.shape)
-        #print(link_T)  # will dump each 4×4 matrix
-        ## then exit so you don’t spam your console forever…
-        #import sys;
-        #sys.exit(0)
-
+        self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
         self.scene.step()
 
-
         # 5) observe & compute reward/done
-        #self.cam.render() #view scene
-        #frame = self.cam.render()[0]
-        #img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
-
         object_position  = self.cube.get_pos()
         gripper_position = self.end_effector.get_pos()
-
-
-        #states = img.repeat(self.num_envs, 1, 1, 1)  # shape: (num_envs, 3, 120, 120)  # unimodal states
-
-        states = []
-        for cam in self.cams:
-            frame = cam.render()[0]
-            img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
-            states.append(img)
-        states = torch.stack(states, dim=0)  # (num_envs, 3, 120, 120)
+        states = torch.concat([object_position, gripper_position], dim=1)
 
         rewards = -torch.norm(object_position - gripper_position, dim=1)
 
@@ -226,7 +142,7 @@ class GraspFixedCubeEnv:
         return states, rewards, dones
 
 
-# main guard, preventing this code from running on import (only run as executable if directly called as python ....py)
+# main guard, preventing this code from running on import
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
     env = GraspFixedCubeEnv(vis=True)

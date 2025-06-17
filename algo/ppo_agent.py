@@ -1,19 +1,36 @@
+# ppo_agent.py
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
-import argparse
-from network.ppo import PPO
+
+from network.ppo import PPO  # your conv-based PPO class
 
 class PPOAgent:
-    def __init__(self, input_dim, output_dim, lr, gamma, clip_epsilon, device, load=False, num_envs=1, hidden_dim=64, checkpoint_path=None):
+    def __init__(
+        self,
+        obs_shape,            # tuple, e.g. (3, 120, 120)
+        output_dim,           # number of discrete actions
+        lr,
+        gamma,
+        clip_epsilon,
+        device,
+        load=False,
+        num_envs=1,
+        checkpoint_path=None
+    ):
         self.device = device
         self.num_envs = num_envs
-        self.model = PPO(input_dim, output_dim, hidden_dim).to(self.device)
         self.checkpoint_path = checkpoint_path
-        if load: 
+
+        # instantiate our conv-based policy network
+        self.model = PPO(obs_shape, output_dim).to(self.device)
+
+        if load:
             self.load_checkpoint()
             print("Loaded model from checkpoint")
+
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
@@ -32,6 +49,11 @@ class PPOAgent:
         print(f"Checkpoint loaded from {self.checkpoint_path}")
 
     def select_action(self, state):
+        """
+        state: tensor of shape (num_envs, C, H, W), float32 in [0,1]
+        returns: tensor of shape (num_envs,) with discrete actions
+        """
+        state = state.to(self.device)
         with torch.no_grad():
             logits = self.model(state)
         probs = nn.functional.softmax(logits, dim=-1)
@@ -40,43 +62,57 @@ class PPOAgent:
         return action
 
     def train(self, states, actions, rewards, dones):
-        # Convert lists to tensors
         states_tensor = torch.stack(states).to(self.device)
         actions_tensor = torch.stack(actions).to(self.device)
-        
-        # Calculate discounted rewards
+        rewards_list = rewards
+        dones_list = dones
+
+        #print(f"[DEBUG] states_tensor shape: {states_tensor.shape}")
+        #print(f"[DEBUG] actions_tensor shape: {actions_tensor.shape}")
+
         discounted_rewards = []
-        R = 0
-        for reward in reversed(rewards):
-            R = reward + self.gamma * R * (~dones[-1])
+        R = torch.zeros(self.num_envs, device=self.device)
+        for reward, done in zip(reversed(rewards_list), reversed(dones_list)):
+            R = reward.to(self.device) + self.gamma * R * (~done.to(self.device))
             discounted_rewards.insert(0, R)
+        discounted_tensor = torch.stack(discounted_rewards)
 
-        discounted_rewards_tensor = torch.stack(discounted_rewards).to(self.device)
+        advantages = discounted_tensor - discounted_tensor.mean()
 
-        # Normalize the rewards
-        advantages = discounted_rewards_tensor - discounted_rewards_tensor.mean()
-        
-        # Update policy using PPO
-        for _ in range(10):  # Number of epochs for each batch update
-            logits_old = self.model(states_tensor).detach()
+        #print(f"[DEBUG] discounted_tensor shape: {discounted_tensor.shape}")
+
+        # Now check dimensions explicitly
+        #print(f"[DEBUG] len(states_tensor.shape): {len(states_tensor.shape)}")
+
+        T, N = states_tensor.shape[:2]
+        if len(states_tensor.shape) == 5:
+            C, H, W = states_tensor.shape[2:]
+            states_flat = states_tensor.reshape(T * N, C, H, W)
+        else:
+            raise ValueError(f"Unexpected states_tensor shape: {states_tensor.shape}")
+
+        with torch.no_grad():
+            logits_old = self.model(states_flat)
             probs_old = nn.functional.softmax(logits_old, dim=-1)
-            
-            logits_new = self.model(states_tensor)
+
+        actions_flat = actions_tensor.view(-1)
+        advantages_flat = advantages.view(-1)
+
+        for _ in range(10):
+            logits_new = self.model(states_flat)
             probs_new = nn.functional.softmax(logits_new, dim=-1)
 
             dist_old = Categorical(probs_old)
             dist_new = Categorical(probs_new)
 
-            ratio = dist_new.log_prob(actions_tensor) - dist_old.log_prob(actions_tensor)
-            ratio = ratio.exp()
+            ratio = (dist_new.log_prob(actions_flat) - dist_old.log_prob(actions_flat)).exp()
 
-            # Calculate surrogate loss
-            surrogate_loss_1 = ratio * advantages
-            surrogate_loss_2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
-            
-            loss = -torch.min(surrogate_loss_1, surrogate_loss_2).mean()
+            surr1 = ratio * advantages_flat
+            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages_flat
+            loss = -torch.min(surr1, surr2).mean()
 
-            # Perform optimization step
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+
+
