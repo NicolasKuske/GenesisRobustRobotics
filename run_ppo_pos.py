@@ -37,7 +37,7 @@ def train_ppo(args):
         num_envs=args.num_envs,
         checkpoint_path=args.checkpoint_path,
 
-        hidden_dim=args.hidden_dim,
+        hidden_dim=64,
         input_dim=env.state_dim,
         output_dim=env.action_space,
 
@@ -109,7 +109,6 @@ def arg_parser():
     )
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
     p.add_argument("-b", "--batch_size", type=int, default=None, help="Batch size")
-    p.add_argument("-hd", "--hidden_dim", type=int, default=64, help="Hidden dim")
     p.add_argument("-t", "--task", type=str, default="GraspFixedCubePos", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
     return p.parse_args()
