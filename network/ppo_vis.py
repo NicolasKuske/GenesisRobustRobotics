@@ -1,13 +1,13 @@
-# network/ppo.py
+# network/ppo_vis.py
 import torch
 import torch.nn as nn
 
 
-class PPO(nn.Module):
+class PPOvis(nn.Module):
     def __init__(self, obs_shape, output_dim):
         # Python 3 allows either of these:
         # super().__init__()
-        super(PPO, self).__init__()
+        super(PPOvis, self).__init__()
 
         C, H, W = obs_shape
 

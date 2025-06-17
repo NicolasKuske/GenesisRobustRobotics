@@ -1,10 +1,10 @@
-#ppo.py
+#ppo_pos.py
 
 import torch.nn as nn
 
-class PPO(nn.Module):
+class PPOpos(nn.Module):
     def __init__(self, input_dim, output_dim, hidden_dim):
-        super(PPO, self).__init__()
+        super(PPOpos, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),

@@ -1,17 +1,17 @@
-#ppo_agent.py
+#ppo_agent_pos.py
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 import argparse
-from network.ppo import PPO
+from network.ppo_pos import PPOpos
 
-class PPOAgent:
+class PPOAgentPos:
     def __init__(self, input_dim, output_dim, lr, gamma, clip_epsilon, device, load=False, num_envs=1, hidden_dim=64, checkpoint_path=None):
         self.device = device
         self.num_envs = num_envs
-        self.model = PPO(input_dim, output_dim, hidden_dim).to(self.device)
+        self.model = PPOpos(input_dim, output_dim, hidden_dim).to(self.device)
         self.checkpoint_path = checkpoint_path
         if load: 
             self.load_checkpoint()

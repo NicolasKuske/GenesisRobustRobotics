@@ -1,7 +1,7 @@
 import argparse
 import genesis as gs
 import torch
-from algo.ppo_agent import PPOAgent
+from algo.ppo_agent_vis import PPOAgent
 from env import *
 import os
 

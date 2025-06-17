@@ -3,7 +3,7 @@ import genesis as gs
 import torch
 from .util import euler_to_quaternion
 
-class GraspRandomCubeEnv:
+class GraspRandomCubePosEnv:
     def __init__(self, vis, device, num_envs=1):
         self.device = device
         self.action_space = 8  
@@ -129,4 +129,4 @@ class GraspRandomCubeEnv:
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu, precision="32")
-    env = GraspRandomCubeEnv(vis=True)
+    env = GraspRandomCubePosEnv(vis=True)

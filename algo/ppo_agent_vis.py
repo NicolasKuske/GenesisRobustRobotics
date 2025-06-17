@@ -1,13 +1,13 @@
-# ppo_agent.py
+# ppo_agent_vis.py
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from network.ppo import PPO  # your conv-based PPO class
+from network.ppo_vis import PPOvis  # your conv-based PPO class
 
-class PPOAgent:
+class PPOAgentVis:
     def __init__(
         self,
         obs_shape,            # tuple, e.g. (3, 120, 120)
@@ -25,7 +25,7 @@ class PPOAgent:
         self.checkpoint_path = checkpoint_path
 
         # instantiate our conv-based policy network
-        self.model = PPO(obs_shape, output_dim).to(self.device)
+        self.model = PPOvis(obs_shape, output_dim).to(self.device)
 
         if load:
             self.load_checkpoint()
