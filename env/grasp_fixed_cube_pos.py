@@ -33,8 +33,8 @@ class GraspFixedCubePosEnv:
         )
         self.cube = self.scene.add_entity(
             gs.morphs.Box(
-                size=(0.04, 0.04, 0.04),
-                pos=(0.65, 0.0, 0.02),
+                size=(0.1, 0.1, 0.1),
+                pos=(0.65, 0.0, 0.05),
             )
         )
 
@@ -146,22 +146,10 @@ class GraspFixedCubePosEnv:
         states = torch.concat([object_position, gripper_position], dim=1)
 
         # --- CORRECTED EXPONENTIAL REWARD ---
-        k = 4.0
-        d0 = 0.1
+        # reward = exp(-k * (dist - 0.1)), max=1.0 at dist=0.1, decays for larger distances
         dist = torch.norm(object_position - gripper_position, dim=1)
-
-        # positive, [0…1]
-        reward_pos = torch.exp(-k * (dist - d0))
-        reward_pos = torch.clamp(reward_pos, min=0.0, max=1.0)
-
-        # negative mirror, [–1…0]
-        numer = torch.exp(-k * dist) - torch.exp(-k * d0)
-        denom = 1.0 - torch.exp(-k * d0)
-        raw_neg = - numer / denom
-        reward_neg = torch.clamp(raw_neg, min=-1.0, max=0.0)
-
-        # e.g. add them, or keep separate
-        rewards = reward_pos + reward_neg
+        reward = torch.exp(-4 * (dist - 0.1))
+        rewards = torch.clamp(reward, min=0.0, max=1.0)
 
         # for a simple reach task you can set done=False always,
         # or drive resets in your training loop by episode length
