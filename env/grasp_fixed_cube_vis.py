@@ -225,24 +225,24 @@ class GraspFixedCubeVisEnv:
         states = torch.stack(states, dim=0)  # (num_envs, 3, 120, 120)
 
         # --- CORRECTED EXPONENTIAL REWARD ---
-k   = 4.0
-d0  = 0.1
-dist = torch.norm(object_position - gripper_position, dim=1)
+        k   = 4.0
+        d0  = 0.1
+        dist = torch.norm(object_position - gripper_position, dim=1)
 
-# positive bump stays the same
-reward_pos = torch.exp(-k * (dist - d0))
-reward_pos = torch.clamp(reward_pos, 0.0, 1.0)
+        # positive bump stays the same
+        reward_pos = torch.exp(-k * (dist - d0))
+        reward_pos = torch.clamp(reward_pos, 0.0, 1.0)
 
-# make the constant a Tensor
-exp_kd0 = torch.exp(torch.tensor(-k * d0, device=dist.device))
+        # make the constant a Tensor
+        exp_kd0 = torch.exp(torch.tensor(-k * d0, device=dist.device))
 
-# mirrored negative bump
-numer   = torch.exp(-k * dist) - exp_kd0
-denom   = 1.0 - exp_kd0
-raw_neg = - numer / denom
-reward_neg = torch.clamp(raw_neg, -1.0, 0.0)
+        # mirrored negative bump
+        numer   = torch.exp(-k * dist) - exp_kd0
+        denom   = 1.0 - exp_kd0
+        raw_neg = - numer / denom
+        reward_neg = torch.clamp(raw_neg, -1.0, 0.0)
 
-total_reward = reward_pos + reward_neg
+        rewards = reward_pos + reward_neg
 
         # for a simple reach task you can set done=False always,
         # or drive resets in your training loop by episode length
