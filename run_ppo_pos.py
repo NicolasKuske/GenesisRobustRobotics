@@ -61,7 +61,7 @@ def train_ppo(args):
 
 
 def run(env, agent, args, writer):
-    num_episodes = 500
+    num_episodes = 50
 
     for episode in range(num_episodes):
         state = env.reset()

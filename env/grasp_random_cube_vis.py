@@ -1,21 +1,23 @@
-#grasp_fixed_cube_vis.py
+# grasp_random_cube_pos.py
 
 import numpy as np
 import genesis as gs
 import torch
-import math
 
-class GraspFixedCubeVisEnv:
+class GraspRandomCubePosEnv:
 
     # Build the scene & entities
     def __init__(self, vis, device, num_envs=1):
         self.device     = device
         self.num_envs   = num_envs
 
-        # now our “state” is the camera image:
-        # we’re using a 120×120 RGB camera
-        self.obs_shape = (3, 120, 120)
-        self.action_space = 6
+        # count how many episodes (resets) have occurred
+        self.episode_count    = 0
+        # will hold the cube position for the current batch of 10 episodes
+        self.current_cube_pos = None
+
+        self.state_dim    = 6  # input dimension: [cube_xyz, gripper_xyz]
+        self.action_space = 6  # output dimension: ±x, ±y, ±z
 
         self.scene = gs.Scene(
             #show_FPS=False,  # Don't show simulation speed
@@ -36,58 +38,22 @@ class GraspFixedCubeVisEnv:
         )
         self.cube = self.scene.add_entity(
             gs.morphs.Box(
-                size=(0.04, 0.04, 0.04),
-                pos=(0.65, 0.0, 0.02),
-            )
+                size=(0.1, 0.1, 0.1),  # x,y,z dimensions in meters
+                pos=(0.35, 0.0, 1.18),  # initial position in world coords
+            ),
+            #this one is blind so colors dont matter
+            #surface=gs.surfaces.Rough(
+            #    color=(0.7, 0, 0),
+            #),
+            material=gs.materials.Rigid(gravity_compensation=1.0)  # ,
+            # surface=gs.surfaces.Metal(double_sided=False, metal_type='copper', metallic=100, color=[206,112,43])
         )
 
-        ##### cam #### attaching cams does not work for parallelized scenes yet, so we manually link cam to arm position below
-        self.cams = []
-        env_space = 5.0  # must match your scene.build(env_spacing=(5.0,5.0))
-
-        M = int(math.sqrt(self.num_envs))
-        assert M * M == self.num_envs, "num_envs must be a perfect square for an M×M grid"
-
-        for idx in range(self.num_envs):
-            # compute row, col in M×M
-            row = idx // M
-            col = idx % M
-
-            # center the grid at (0,0)
-            x_off = (col - (M - 1) / 2) * env_space
-            y_off = (row - (M - 1) / 2) * env_space
-
-            cam = self.scene.add_camera(
-                res=(120, 120),
-                pos=(2.5 + x_off, 0.5 + y_off, 2.5),
-                lookat=(x_off, y_off, 0.2),
-                fov=30,
-                GUI=False,
-            )
-            self.cams.append(cam)
-
-        #T = np.eye(4)
-        # Define Rx 180° rotation matrix - rotates around the x-axis in the direction away from the robot
-        #Rx_180 = np.array([
-        #    [1, 0, 0],
-        #    [0, -1, 0],
-        #    [0, 0, -1]
-        #])
-        #T[:3, :3] = Rx_180
-        #T[:3, 3] = np.array([0.05, 0.0, 0.0])  # each link has a different wire frame which can be observed in the scene view window (press l)
-        # for the hand link the z axis goes out upward, and the x axis orthogonal to arm direction outward (foward in x direction)
-
-
-        self.scene.build(n_envs=self.num_envs, env_spacing=(env_space, env_space)) #only space envs in x direction
+        self.scene.build(n_envs=self.num_envs)
         self.envs_idx = np.arange(self.num_envs)
 
         # (Re)position robot to a default “ready” pose
         self.build_env()
-
-        # add camera and start recording
-
-        for cam in self.cams:
-            cam.start_recording()
 
 
     # (Re)position robot to a default “ready” pose
@@ -104,8 +70,8 @@ class GraspFixedCubeVisEnv:
             -0.1,  # head yaw - Decreasing values with clock, delta 0.7 approx 45°
              1.7,  # head pitch - Increasing values with clock, delta 0.7 approx 45°
              1.0,  # hand roll - Decreasing values with clock
-             0.02, # left and right gripper distance to middle
-             0.02  # (ignored)
+             0.01, # left and right gripper distance to middle
+             0.01  # (ignored)
         ], dtype=torch.float32, device=self.device)
         franka_pos = franka_pos.unsqueeze(0).repeat(self.num_envs, 1)
         self.franka.set_qpos(franka_pos, envs_idx=self.envs_idx)
@@ -121,10 +87,9 @@ class GraspFixedCubeVisEnv:
         quat = self.end_effector.get_quat().clone()  # (num_envs×4)
 
         ## Define a fixed Cartesian target for the hand (just the above q values in approx. cartesian)
-        ## NOT SURE if this is necessary but might get better control values for the robot
-        pos = torch.tensor([0.2720, -0.1683, 1.0164], dtype=torch.float32, device=self.device)
+        pos = torch.tensor([ 0.2720, -0.1683,  1.0164], dtype=torch.float32, device=self.device)
         self.pos = pos.unsqueeze(0).repeat(self.num_envs, 1)
-        quat = torch.tensor([0.1992, 0.7857, -0.3897, 0.4371], dtype=torch.float32, device=self.device)
+        quat = torch.tensor([ 0.1992,  0.7857, -0.3897,  0.4371], dtype=torch.float32, device=self.device)
         self.quat = quat.unsqueeze(0).repeat(self.num_envs, 1)
         self.qpos = self.franka.inverse_kinematics(
             link=self.end_effector,
@@ -134,27 +99,30 @@ class GraspFixedCubeVisEnv:
         self.franka.control_dofs_position(self.qpos[:, :-2], self.motors_dof, self.envs_idx)
 
 
-
-
-
-
     # Reset cube position + robot → return initial state
     def reset(self):
+        # increment episode counter
+        self.episode_count += 1
+
+        # every new batch of 10 episodes, sample a fresh cube position
+        if (self.episode_count - 1) % 10 == 0:
+            # x, y: magnitude ∈ [0.2,1.0] with random sign; z ∈ [0.05,1.0]
+            abs_xy = np.random.uniform(0.2, 1.0, size=(self.num_envs, 2))
+            signs  = np.random.choice([-1.0, 1.0], size=(self.num_envs, 2))
+            xy     = abs_xy * signs
+            z      = np.random.uniform(0.05, 1.0, size=(self.num_envs, 1))
+            self.current_cube_pos = np.concatenate([xy, z], axis=1).astype(np.float32)
+
+        # (Re)position robot to a default “ready” pose
         self.build_env()
 
-        # fixed cube position
-        cube_pos = np.array([0.65, 0.0, 0.02])
-        cube_pos = np.repeat(cube_pos[np.newaxis], self.num_envs, axis=0)
-        self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
+        # randomized cube position (constant for this block of 10 episodes)
+        self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
-
-        states = []
-        for cam in self.cams:
-            frame = cam.render()[0]   # extract RGB image only  # shape (120,120,3), uint8
-            img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
-            states.append(img)
-        state = torch.stack(states, dim=0)  # (num_envs, 3, 120, 120)
-
+        obs1 = self.cube.get_pos()
+        obs2 = (self.franka.get_link("left_finger").get_pos() +
+                self.franka.get_link("right_finger").get_pos()) / 2
+        state = torch.concat([obs1, obs2], dim=1)
         return state
 
 
@@ -185,52 +153,29 @@ class GraspFixedCubeVisEnv:
             quat = self.quat, # keep the original quaternion value
         )
 
-
         # 4) command the arm joints, keep the gripper position constant, then step the sim
-        self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof)# self.envs_idx)
-        # 4.1) force fingers constant
+        self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
+
+        # 4.1) FORCE FINGERS CONSTANT ===
         # Gravity might pull them down, so we re-send the same opening
         self.franka.control_dofs_position(
             self.fixed_finger_pos, self.fingers_dof, self.envs_idx
         )
-
-        #link = self.franka.get_link("hand")
-        #link_T = link.get_transform()  # torch.Tensor, shape: (num_envs, 4, 4)
-        #print("link_T.shape=", link_T.shape)
-        #print(link_T)  # will dump each 4×4 matrix
-        ## then exit so you don’t spam your console forever…
-        #import sys;
-        #sys.exit(0)
-
         self.scene.step()
 
-
         # 5) observe & compute reward/done
-        #self.cam.render() #view scene
-        #frame = self.cam.render()[0]
-        #img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
-
         object_position  = self.cube.get_pos()
-        gripper_position = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link(
-            "right_finger").get_pos()) / 2
-
-
-        #states = img.repeat(self.num_envs, 1, 1, 1)  # shape: (num_envs, 3, 120, 120)  # unimodal states
-
-        states = []
-        for cam in self.cams:
-            frame = cam.render()[0]
-            img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
-            states.append(img)
-        states = torch.stack(states, dim=0)  # (num_envs, 3, 120, 120)
-
+        gripper_position = (
+            self.franka.get_link("left_finger").get_pos() +
+            self.franka.get_link("right_finger").get_pos()
+        ) / 2
+        states = torch.concat([object_position, gripper_position], dim=1)
 
         # --- CORRECTED EXPONENTIAL REWARD ---
         # reward = exp(-k * (dist - 0.1)), max=1.0 at dist=0.1, decays for larger distances
-        dist = torch.norm(object_position - gripper_position, dim=1)
-        reward = torch.exp(-4 * (dist - 0.1))
+        dist    = torch.norm(object_position - gripper_position, dim=1)
+        reward  = torch.exp(-4 * (dist - 0.1))
         rewards = torch.clamp(reward, min=0.0, max=1.0)
-
 
         # for a simple reach task you can set done=False always,
         # or drive resets in your training loop by episode length
@@ -242,7 +187,7 @@ class GraspFixedCubeVisEnv:
         return states, rewards, dones
 
 
-# main guard, preventing this code from running on import (only run as executable if directly called as python ....py)
+# main guard, preventing this code from running on import
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
-    env = GraspFixedCubeVisEnv(vis=True)
+    env = GraspRandomCubePosEnv(vis=True, device="cuda")
