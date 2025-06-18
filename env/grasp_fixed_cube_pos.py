@@ -148,8 +148,8 @@ class GraspFixedCubePosEnv:
         # --- CORRECTED EXPONENTIAL REWARD ---
         # reward = exp(-k * (dist - 0.1)), max=1.0 at dist=0.1, decays for larger distances
         dist = torch.norm(object_position - gripper_position, dim=1)
-        reward_pos = torch.exp(-4 * (dist - 0.1))
-        rewards_pos = torch.clamp(reward, min=0.0, max=1.0)
+        reward = torch.exp(-4 * (dist - 0.1))
+        rewards = torch.clamp(reward, min=0.0, max=1.0)
 
 
 
