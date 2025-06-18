@@ -44,19 +44,12 @@ class GraspFixedCubePosEnv:
         # (Re)position robot to a default “ready” pose
         self.build_env()
 
-        # which link we’ll control via IK
-        self.end_effector = self.franka.get_link("hand")
-
-        # extract initial Cartesian target and orientation from home pose for reset
-        self.pos  = self.end_effector.get_pos().clone()   # (num_envs×3)
-        self.quat = self.end_effector.get_quat().clone()  # (num_envs×4)
-
 
     # (Re)position robot to a default “ready” pose
     def build_env(self):
         # only the 7 arm joints (ignore fingers now)
         self.motors_dof = torch.arange(7).to(self.device)
-
+        self.fingers_dof = torch.arange(7, 9).to(self.device)
         #Joint limits ≈ [-2.8973, 2.8973] radians (for most joints)
         franka_pos = torch.tensor([
             -1.0,  # foot yaw - rotation around z-axis of the foot. -1 is foot directed towards x-axis. Decreasing values with clock (0 is y-axis)
@@ -66,21 +59,38 @@ class GraspFixedCubePosEnv:
             -0.1,  # head yaw - Decreasing values with clock, delta 0.7 approx 45°
              1.7,  # head pitch - Increasing values with clock, delta 0.7 approx 45°
              1.0,  # hand roll - Decreasing values with clock
-             0.02, # left and right gripper distance to middle
-             0.02  # (ignored)
+             0.01, # left and right gripper distance to middle
+             0.01  # (ignored)
         ], dtype=torch.float32, device=self.device)
         franka_pos = franka_pos.unsqueeze(0).repeat(self.num_envs, 1)
-
         self.franka.set_qpos(franka_pos, envs_idx=self.envs_idx)
         self.scene.step()
+
+        # === STORE FIXED FINGER TARGETS ===
+        # We read back the same joint values we just set,
+        # and save them so we can re-command every step
+        self.fixed_finger_pos = franka_pos[:, 7:9].clone()
+        # Identify end‐effector link for IK calls
+        self.end_effector = self.franka.get_link("hand")
+        pos = self.end_effector.get_pos().clone()  # (num_envs×3)
+        quat = self.end_effector.get_quat().clone()  # (num_envs×4)
+
+        ## Define a fixed Cartesian target for the hand (just the above q values in approx. cartesian)
+        pos = torch.tensor([ 0.2720, -0.1683,  1.0164], dtype=torch.float32, device=self.device)
+        self.pos = pos.unsqueeze(0).repeat(self.num_envs, 1)
+        quat = torch.tensor([ 0.1992,  0.7857, -0.3897,  0.4371], dtype=torch.float32, device=self.device)
+        self.quat = quat.unsqueeze(0).repeat(self.num_envs, 1)
+        self.qpos = self.franka.inverse_kinematics(
+            link=self.end_effector,
+            pos=self.pos,
+            quat=self.quat,
+        )
+        self.franka.control_dofs_position(self.qpos[:, :-2], self.motors_dof, self.envs_idx)
 
 
     # Reset cube position + robot → return initial state
     def reset(self):
         self.build_env()
-        # re-extract current Cartesian target/orientation
-        self.pos  = self.end_effector.get_pos().clone()
-        self.quat = self.end_effector.get_quat().clone()
 
         # fixed cube position
         cube_pos = np.array([0.65, 0.0, 0.02])
@@ -88,7 +98,7 @@ class GraspFixedCubePosEnv:
         self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
 
         obs1 = self.cube.get_pos()
-        obs2 = self.end_effector.get_pos()
+        obs2 = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos()) / 2
         state = torch.concat([obs1, obs2], dim=1)
         return state
 
@@ -120,17 +130,29 @@ class GraspFixedCubePosEnv:
             quat = self.quat, # keep the original quaternion value
         )
 
-
         # 4) command the arm joints, keep the gripper position constant, then step the sim
         self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
+
+        # 4.1) FORCE FINGERS CONSTANT ===
+        # Gravity might pull them down, so we re-send the same opening
+        self.franka.control_dofs_position(
+            self.fixed_finger_pos, self.fingers_dof, self.envs_idx
+        )
         self.scene.step()
 
         # 5) observe & compute reward/done
         object_position  = self.cube.get_pos()
-        gripper_position = self.end_effector.get_pos()
+        gripper_position = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos()) / 2
         states = torch.concat([object_position, gripper_position], dim=1)
 
-        rewards = -torch.norm(object_position - gripper_position, dim=1)
+        # --- CORRECTED EXPONENTIAL REWARD ---
+        # reward = exp(-k * (dist - 0.1)), max=1.0 at dist=0.1, decays for larger distances
+        dist = torch.norm(object_position - gripper_position, dim=1)
+        reward_pos = torch.exp(-4 * (dist - 0.1))
+        rewards_pos = torch.clamp(reward, min=0.0, max=1.0)
+
+
+
 
         # for a simple reach task you can set done=False always,
         # or drive resets in your training loop by episode length
