@@ -62,7 +62,7 @@ class GraspFixedCubeVisEnv:
                 pos=(2.5 + x_off, 0.5 + y_off, 2.5),
                 lookat=(x_off, y_off, 0.2),
                 fov=30,
-                GUI=True,
+                GUI=False,
             )
             self.cams.append(cam)
 
