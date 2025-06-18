@@ -42,9 +42,9 @@ class GraspRandomCubePosEnv:
                 pos=(0.35, 0.0, 1.18),  # initial position in world coords
             ),
             #this one is blind so colors dont matter
-            surface=gs.surfaces.Rough(
-                color=(0.7, 0, 0),
-            ),
+            #surface=gs.surfaces.Rough(
+            #    color=(0.7, 0, 0),
+            #),
             material=gs.materials.Rigid(gravity_compensation=1.0)  # ,
             # surface=gs.surfaces.Metal(double_sided=False, metal_type='copper', metallic=100, color=[206,112,43])
         )
