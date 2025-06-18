@@ -1,3 +1,4 @@
 from .grasp_fixed_cube_vis import GraspFixedCubeVisEnv
 from .grasp_fixed_cube_pos import GraspFixedCubePosEnv
 from .grasp_random_cube_pos import GraspRandomCubePosEnv
+from .grasp_random_cube_vis import GraspRandomCubeVisEnv

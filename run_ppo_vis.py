@@ -15,7 +15,7 @@ from env import *
 # map task names to env classes
 task_to_class = {
     'GraspFixedCubeVis': GraspFixedCubeVisEnv,
-    #'GraspRandomCubeVis': GraspRandomCubeVisEnv, #still to build
+    'GraspRandomCubeVis': GraspRandomCubeVisEnv, #still to build
 }
 
 def create_environment(task_name):
