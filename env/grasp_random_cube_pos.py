@@ -51,6 +51,9 @@ class GraspRandomCubePosEnv:
         self.scene.step()
 
         self.end_effector = self.franka.get_link("hand")
+        pos = self.end_effector.get_pos().clone()  # (num_envs×3)
+        quat = self.end_effector.get_quat().clone()  # (num_envs×4)
+
         ## here self.pos and self.quat is target for the end effector; not the cube. cube position is set in reset()
         pos = torch.tensor([0.65, 0.0, 0.135], dtype=torch.float32, device=self.device)
         self.pos = pos.unsqueeze(0).repeat(self.num_envs, 1)
@@ -67,8 +70,8 @@ class GraspRandomCubePosEnv:
         self.build_env()
         ## random cube position
         cube_pos = np.array([0.65, 0.0, 0.02])
-        x_min, x_max = 0.64, 0.66  
-        y_min, y_max = -0.01, 0.01  
+        x_min, x_max = 0.5, 0.7
+        y_min, y_max = -0.1, 0.1
         random_x = np.random.uniform(x_min, x_max, size=self.num_envs)
         random_y = np.random.uniform(y_min, y_max, size=self.num_envs)
         cube_pos = np.column_stack((random_x, random_y, np.full(self.num_envs, cube_pos[2])))
