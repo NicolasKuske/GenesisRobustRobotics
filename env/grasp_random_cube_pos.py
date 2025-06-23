@@ -42,9 +42,9 @@ class GraspRandomCubePosEnv:
                 pos=(0.35, 0.0, 1.18),  # initial position in world coords
             ),
             #this one is blind so colors dont matter
-            surface=gs.surfaces.Rough(
-                color=(0.7, 0, 0),
-            ),
+            #surface=gs.surfaces.Rough(
+            #    color=(0.7, 0, 0),
+            #),
             material=gs.materials.Rigid(gravity_compensation=1.0)  # ,
             # surface=gs.surfaces.Metal(double_sided=False, metal_type='copper', metallic=100, color=[206,112,43])
         )
@@ -101,22 +101,22 @@ class GraspRandomCubePosEnv:
 
     # Reset cube position + robot → return initial state
     def reset(self):
-        # increment episode counter
         self.episode_count += 1
 
-        # every new batch of 10 episodes, sample a fresh cube position
+        # every new batch of 10 episodes:
         if (self.episode_count - 1) % 10 == 0:
-            # x, y: magnitude ∈ [0.2,1.0] with random sign; z ∈ [0.05,1.0]
-            abs_xy = np.random.uniform(0.2, 1.0, size=(self.num_envs, 2))
-            signs  = np.random.choice([-1.0, 1.0], size=(self.num_envs, 2))
-            xy     = abs_xy * signs
-            z      = np.random.uniform(0.05, 1.0, size=(self.num_envs, 1))
-            self.current_cube_pos = np.concatenate([xy, z], axis=1).astype(np.float32)
+            # sample a single random pos
+            abs_xy = np.random.uniform(0.2, 1.0, size=(1, 2))
+            signs = np.random.choice([-1.0, 1.0], size=(1, 2))
+            xy = abs_xy * signs  # shape (1,2)
+            z = np.random.uniform(0.05, 1.0, size=(1, 1))
+            one_pos = np.concatenate([xy, z], axis=1)  # shape (1,3)
 
-        # (Re)position robot to a default “ready” pose
+            # broadcast to all envs
+            self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)  # (num_envs,3)
+
+        # rebuild robot, and same cube for all envs.
         self.build_env()
-
-        # randomized cube position (constant for this block of 10 episodes)
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
         obs1 = self.cube.get_pos()
