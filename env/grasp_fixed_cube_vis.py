@@ -194,28 +194,17 @@ class GraspFixedCubeVisEnv:
             self.fixed_finger_pos, self.fingers_dof, self.envs_idx
         )
 
-        #link = self.franka.get_link("hand")
-        #link_T = link.get_transform()  # torch.Tensor, shape: (num_envs, 4, 4)
-        #print("link_T.shape=", link_T.shape)
-        #print(link_T)  # will dump each 4×4 matrix
-        ## then exit so you don’t spam your console forever…
-        #import sys;
-        #sys.exit(0)
+
 
         self.scene.step()
 
 
         # 5) observe & compute reward/done
-        #self.cam.render() #view scene
-        #frame = self.cam.render()[0]
-        #img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
 
         object_position  = self.cube.get_pos()
         gripper_position = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link(
             "right_finger").get_pos()) / 2
 
-
-        #states = img.repeat(self.num_envs, 1, 1, 1)  # shape: (num_envs, 3, 120, 120)  # unimodal states
 
         states = []
         for cam in self.cams:

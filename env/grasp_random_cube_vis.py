@@ -130,40 +130,31 @@ class GraspRandomCubeVisEnv:
 
     # Reset cube position + robot → return initial state
     def reset(self):
-        # increment episode counter
         self.episode_count += 1
 
         # every new batch of 10 episodes:
-        #   - sample a fresh cube position
-        #   - sample a fresh random color
         if (self.episode_count - 1) % 10 == 0:
-            abs_xy = np.random.uniform(0.2, 1.0, size=(self.num_envs, 2))
-            signs  = np.random.choice([-1.0, 1.0], size=(self.num_envs, 2))
-            xy     = abs_xy * signs
-            z      = np.random.uniform(0.05, 1.0, size=(self.num_envs, 1))
-            self.current_cube_pos = np.concatenate([xy, z], axis=1).astype(np.float32)
+            # sample a single random pos
+            abs_xy = np.random.uniform(0.2, 1.0, size=(1, 2))
+            signs = np.random.choice([-1.0, 1.0], size=(1, 2))
+            xy = abs_xy * signs  # shape (1,2)
+            z = np.random.uniform(0.05, 1.0, size=(1, 1))
+            one_pos = np.concatenate([xy, z], axis=1)  # shape (1,3)
 
-            # random RGB color per env, values in [0,1]
-            #self.current_color = np.random.rand(self.num_envs, 3).astype(np.float32)
+            # broadcast to all envs
+            self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)  # (num_envs,3)
 
-        # (Re)position robot to a default “ready” pose
+        # rebuild robot, and same cube for all envs.
         self.build_env()
-
-        # set cube position (constant for this block of 10 episodes)
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
-        # update cube color by replacing its internal surface
-        # (we draw one random RGB per batch and apply it to all envs)
-        #new_surf = gs.surfaces.Rough(color=tuple(self.current_color[0]))
-        #self.cube.surface = new_surf
 
+        # …render & return state as before
         states = []
         for cam in self.cams:
-            frame = cam.render()[0]   # extract RGB image only  # shape (120,120,3), uint8
-            img = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0
+            rgb = cam.render()[0]
+            img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0
             states.append(img)
-        state = torch.stack(states, dim=0)  # (num_envs, 3, 120, 120)
-
-        return state
+        return torch.stack(states, dim=0)
 
 
     # Apply discrete actions → step physics → return (state, reward, done)
