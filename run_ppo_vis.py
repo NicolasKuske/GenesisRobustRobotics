@@ -15,7 +15,10 @@ from env import *
 # map task names to env classes
 task_to_class = {
     'GraspFixedCubeVis': GraspFixedCubeVisEnv,
-    'GraspRandomCubeVis': GraspRandomCubeVisEnv, #still to build
+    'GraspRandomCubeVis': GraspRandomCubeVisEnv,
+
+    'GraspFixedCubeEgoVis': GraspFixedCubeEgoVisEnv,
+    'GraspRandomCubeEgoVis': GraspRandomCubeEgoVisEnv,
 }
 
 def create_environment(task_name):
@@ -98,7 +101,7 @@ def arg_parser():
         help="`-l` alone loads default checkpoint; `-l path.pth` loads that file"
     )
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
-    p.add_argument("-t", "--task", type=str, default="GraspFixedCubeVis", help="Task")
+    p.add_argument("-t", "--task", type=str, default="GraspFixedCubeEgoVis", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
     return p.parse_args()
 
