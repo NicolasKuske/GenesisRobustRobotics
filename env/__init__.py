@@ -1,6 +1,16 @@
-from .grasp_fixed_cube_pos import GraspFixedCubePosEnv
-from .grasp_random_cube_pos import GraspRandomCubePosEnv
-from .grasp_fixed_cube_vis import GraspFixedCubeVisEnv
-from .grasp_random_cube_vis import GraspRandomCubeVisEnv
-from .grasp_fixed_cube_ego_vis import GraspFixedCubeEgoVisEnv
-from .grasp_random_cube_ego_vis import GraspRandomCubeEgoVisEnv
+#env/_init_.py
+
+
+#xzy position only
+from .reach_cube_position import ReachCubePositionEnv
+from .reach_cube_position_stacked import ReachCubePositionStackedEnv
+
+#third person vision only
+from .reach_cube_vision import ReachCubeVisionEnv
+from .reach_cube_vision_stacked import ReachCubeVisionStackedEnv
+
+#end effector ego perspective vision only
+from .reach_cube_ego_vision import ReachCubeEgoVisionEnv
+
+#end effector microphone only
+from .reach_cube_ego_audio import ReachCubeEgoAudioEnv

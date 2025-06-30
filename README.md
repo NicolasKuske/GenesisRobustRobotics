@@ -2,7 +2,7 @@
 
 This repository contains RL environments using the Genesis general-purpose physics platform to test multimodal continual learning.
 
-You can choose between xyz-position based RL and vision-based RL. --- currently multimodality is not implemented
+You can choose between xyz-position based, vision-based and audio-based RL. --- currently multimodality is not implemented
 
 
 ## 🔥 News
@@ -42,7 +42,7 @@ That's it for now!
 
 You can run different learning algorithms with the following command structure. Here is an example of running training with 10 envs using xyz-position based RL 
 ```bash
-python run_ppo_pos.py -n 10
+python run_ppo_position.py -n 10
 ```
 Exchange 'pos' with 'vis' for vision based RL. 
 
@@ -78,12 +78,12 @@ You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}
 
 You can add `-d mps` to train:
 ```bash
-python run_ppo_vis.py -n 10 -d mps
+python run_ppo_vision.py -n 10 -d mps
 ```
 
 - Evaluation
 
 You can add `-d mps` to eval and visualization:
 ```bash
-python run_ppo_vis.py -l -v -n 1 -t GraspFixedBlock -d mps
+python run_ppo_vision.py -l -v -n 1 -t GraspFixedBlock -d mps
 ```
