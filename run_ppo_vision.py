@@ -17,6 +17,8 @@ from env import *
 # map task names to env classes
 task_to_class = {
     'ReachCubeVision': ReachCubeVisionEnv,
+    'ReachCubeVisionStacked': ReachCubeVisionStackedEnv,
+
     'ReachCubeEgoVision': ReachCubeEgoVisionEnv,
 }
 
@@ -89,7 +91,8 @@ def run(env, agent, args, writer):
         mean_reward = total_reward.mean().item()
         writer.add_scalar('Reward/Mean', mean_reward, episode)
 
-        print(f"[Episode {episode}] Mean Reward: {mean_reward}")
+        print(f"\n [Episode {episode}] Total Reward: {total_reward}  Mean Reward: {mean_reward}\n ")
+
 
 def arg_parser():
     p = argparse.ArgumentParser()

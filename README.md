@@ -42,7 +42,7 @@ That's it for now!
 
 You can run different learning algorithms with the following command structure. Here is an example of running training with 10 envs using xyz-position based RL 
 ```bash
-python run_ppo_pos.py -n 10
+python run_ppo_position.py -n 10
 ```
 Exchange 'pos' with 'vis' for vision based RL. 
 
