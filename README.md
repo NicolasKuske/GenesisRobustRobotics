@@ -2,7 +2,7 @@
 
 This repository contains RL environments using the Genesis general-purpose physics platform to test multimodal continual learning.
 
-You can choose between xyz-position based RL and vision-based RL. --- currently multimodality is not implemented
+You can choose between xyz-position based, vision-based and audio-based RL. --- currently multimodality is not implemented
 
 
 ## 🔥 News
