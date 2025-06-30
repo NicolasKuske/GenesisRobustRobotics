@@ -14,8 +14,8 @@ from env import *
 
 # map task names to env classes
 task_to_class = {
-    'GraspFixedCubePos': GraspFixedCubePosEnv,
-    'GraspRandomCubePos': GraspRandomCubePosEnv
+    'ReachFixedCubePos': ReachFixedCubePosEnv,
+    'ReachRandomCubePos': ReachRandomCubePosEnv
 }
 
 def create_environment(task_name):
@@ -61,7 +61,7 @@ def train_ppo(args):
 
 
 def run(env, agent, args, writer):
-    num_episodes = 50
+    num_episodes = 1000000
 
     for episode in range(num_episodes):
         state = env.reset()
@@ -70,7 +70,7 @@ def run(env, agent, args, writer):
 
         states, actions, rewards, dones = [], [], [], []
 
-        for _ in range(100):
+        for _ in range(200):
             action = agent.select_action(state)
             next_state, reward, done = env.step(action)
 
@@ -89,7 +89,7 @@ def run(env, agent, args, writer):
         agent.train(states, actions, rewards, dones)
 
         # save checkpoint periodically
-        if episode % 10 == 0:
+        if episode % 5 == 0:
             agent.save_checkpoint()
 
         # log to TensorBoard: mean reward across environments
@@ -109,7 +109,7 @@ def arg_parser():
     )
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
     p.add_argument("-b", "--batch_size", type=int, default=None, help="Batch size")
-    p.add_argument("-t", "--task", type=str, default="GraspFixedCubePos", help="Task")
+    p.add_argument("-t", "--task", type=str, default="ReachFixedCubePos", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
     return p.parse_args()
 
