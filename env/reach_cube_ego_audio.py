@@ -51,7 +51,7 @@ class ReachCubeEgoAudioEnv:
             gs.morphs.MJCF(file="../assets/xml/franka_emika_panda/panda.xml")
         )
         # initial cube; will be set on first reset
-        initial_pos = (0.65, 0.0, 0.04)
+        initial_pos = (0.65, 0.0, 0.1)
         self.cube   = self.scene.add_entity(
             gs.morphs.Box(size=(0.06,0.06,0.06), pos=initial_pos),
             surface=gs.surfaces.Rough(color=(0.99,0.82,0.09)),
@@ -164,7 +164,7 @@ class ReachCubeEgoAudioEnv:
         elif self.episode_count % self.randomize_every == 0:
             # subsequent randomizations
             xy = np.random.uniform(0.2, 1.0, size=(1, 2)) * np.random.choice([-1, 1], size=(1, 2))
-            z  = np.random.uniform(0.05, 1.0, size=(1, 1))
+            z  = np.random.uniform(0.1, 1.0, size=(1, 1))
             one_pos = np.concatenate([xy, z], axis=1)
             self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
         # else: keep previous position

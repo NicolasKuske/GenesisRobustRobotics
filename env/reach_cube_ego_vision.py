@@ -14,7 +14,7 @@ class ReachCubeEgoVisionEnv:
         self.randomize_every = randomize_every
         self.episode_count = 0
         # Initial fixed cube position
-        self.initial_pos = np.array([0.65, 0.0, 0.04])[None, :]
+        self.initial_pos = np.array([0.65, 0.0, 0.1])[None, :]
         self.current_cube_pos = None
 
         # Observation and action dimensions
@@ -140,7 +140,7 @@ class ReachCubeEgoVisionEnv:
             abs_xy = np.random.uniform(0.2, 1.0, size=(1, 2))
             signs = np.random.choice([-1.0, 1.0], size=(1, 2))
             xy = abs_xy * signs
-            z = np.random.uniform(0.05, 1.0, size=(1, 1))
+            z = np.random.uniform(0.1, 1.0, size=(1, 1))
             one_pos = np.concatenate([xy, z], axis=1)
         else:
             # keep previous position
