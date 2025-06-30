@@ -16,9 +16,9 @@ class ReachCubeVisionStackedEnv:
         self.episode_count = 0
 
         # history settings: sim dt=0.01 → 100 Hz → 10 steps = 100 ms
-        self.history_length = 10
+        self.history_length = 4
         # sample five frames over that window
-        self.sample_offsets = [-9, -7, -5, -3, -1]
+        self.sample_offsets = [-3, -2 , -1, 0]
         # will hold torch tensors of shape (num_envs, 3, 120, 120)
         self.image_history = deque(maxlen=self.history_length)
 
