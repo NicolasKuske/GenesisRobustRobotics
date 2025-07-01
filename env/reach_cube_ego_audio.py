@@ -14,7 +14,7 @@ class ReachCubeEgoAudioEnv:
     def __init__(
         self, vis: bool, device: torch.device,
         num_envs: int = 1, listen_idx: int = None,
-        show_every: int = 10, randomize_every: int = 2
+        show_every: int = 10, randomize_every: int = 100
     ):
         # --- Config ---
         self.device          = device
