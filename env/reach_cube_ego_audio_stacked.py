@@ -168,7 +168,10 @@ class ReachCubeEgoAudioStackedEnv:
     def reset(self) -> torch.Tensor:
         self.episode_count += 1
         if self.episode_count == 1:
-            pos = np.array([[0.65, 0.0, 0.1]])
+       	     pos = np.array([[0.65, 0.0, 0.1]])  #default_position
+       	    #pos = np.array([[-0.5, 0.3, 0.7]]) #new_position1
+            #pos = np.array([[0.1, 0.5, 0.3]])  #new_position2
+       
         elif self.episode_count % self.randomize_every == 0:
             xy = np.random.uniform(0.2,1.0,(1,2)) * np.random.choice([-1,1],(1,2))
             z = np.random.uniform(0.1,1.0,(1,1))
