@@ -14,6 +14,7 @@ from env import *
 
 task_to_class = {
     'ReachCubeEgoAudio': ReachCubeEgoAudioEnv,
+    'ReachCubeEgoAudioStacked': ReachCubeEgoAudioStackedEnv,
 }
 
 def create_environment(task_name):

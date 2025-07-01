@@ -1,3 +1,6 @@
+# reach_cube_ego_vision_stacked.py
+
+
 import numpy as np
 import genesis as gs
 import torch
@@ -6,7 +9,7 @@ import matplotlib.pyplot as plt
 from collections import deque
 from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 
-class ReachCubeEgoVisionEnv:
+class ReachCubeEgoVisionStackedEnv:
     # Build the scene & entities with stacked frames history, and display when n=1
     def __init__(self, vis, device, num_envs=1, randomize_every=100):
         self.device = device
@@ -16,14 +19,14 @@ class ReachCubeEgoVisionEnv:
         self.step_count = 0
 
         # history settings: sim dt=0.01 → 100 Hz → 10 steps = 100 ms
-        #self.history_length = 20
+        self.history_length = 20
         # sample four frames over that window
-        #self.sample_offsets = [-20, -15, -10, -5, -1]
+        self.sample_offsets = [-20, -15, -10, -5, -1]
         
         
-        self.history_length = 10
+        #self.history_length = 10
         # sample four frames over that window
-        self.sample_offsets = [-9, -6, -3, -1]
+        #self.sample_offsets = [-9, -6, -3, -1]
         
         
         # will hold torch tensors of shape (num_envs, 3, 120, 120)
@@ -200,4 +203,4 @@ class ReachCubeEgoVisionEnv:
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
-    env = ReachCubeEgoVisionEnv(vis=True, device=torch.device("cuda"))
+    env = ReachCubeEgoVisionStackedEnv(vis=True, device=torch.device("cuda"))

@@ -20,6 +20,7 @@ task_to_class = {
     'ReachCubeVisionStacked': ReachCubeVisionStackedEnv,
 
     'ReachCubeEgoVision': ReachCubeEgoVisionEnv,
+    'ReachCubeEgoVisionStacked': ReachCubeEgoVisionStackedEnv,
 }
 
 def create_environment(task_name):

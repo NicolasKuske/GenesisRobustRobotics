@@ -11,6 +11,8 @@ from .reach_cube_vision_stacked import ReachCubeVisionStackedEnv
 
 #end effector ego perspective vision only
 from .reach_cube_ego_vision import ReachCubeEgoVisionEnv
+from .reach_cube_ego_vision_stacked import ReachCubeEgoVisionStackedEnv
 
 #end effector microphone only
 from .reach_cube_ego_audio import ReachCubeEgoAudioEnv
+from .reach_cube_ego_audio_stacked import ReachCubeEgoAudioStackedEnv
