@@ -20,7 +20,7 @@ class ReachCubeEgoAudioStackedEnv:
         vis: bool,
         device: torch.device,
         num_envs: int = 1,
-        listen_idx: int = 0,
+        listen_idx: int = None,
         show_every: int = 10,
         randomize_every: int = 100,
     ):
@@ -168,7 +168,7 @@ class ReachCubeEgoAudioStackedEnv:
     def reset(self) -> torch.Tensor:
         self.episode_count += 1
         if self.episode_count == 1:
-       	     pos = np.array([[0.65, 0.0, 0.1]])  #default_position
+       	    pos = np.array([[0.65, 0.0, 0.1]])  #default_position
        	    #pos = np.array([[-0.5, 0.3, 0.7]]) #new_position1
             #pos = np.array([[0.1, 0.5, 0.3]])  #new_position2
        
@@ -214,8 +214,8 @@ class ReachCubeEgoAudioStackedEnv:
         obs = self._build_observation()
 
         self.step_count += 1
-        if self.num_envs == 1 and self.step_count % self.show_every == 0:
-            self._plot_stacked(obs[0])
+        #if self.num_envs == 1 and self.step_count % self.show_every == 0:
+        #    self._plot_stacked(obs[0])
 
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
