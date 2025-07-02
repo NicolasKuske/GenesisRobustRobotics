@@ -33,7 +33,9 @@ class ReachCubeEgoVisionStackedEnv:
         self.image_history = deque(maxlen=self.history_length)
 
         # Initial fixed cube position
-        self.initial_pos = np.array([0.65, 0.0, 0.1])[None, :]
+        #self.initial_pos = np.array([0.65, 0.0, 0.1])[None, :] #position0
+        self.initial_pos = np.array([0.1, 0.5, 0.3])[None, :]
+        #one_pos = np.array([[0.1, 0.5, 0.3]]).reshape(1, 3) #position2
         self.current_cube_pos = None
 
         # Observation and action dimensions
