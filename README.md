@@ -6,8 +6,8 @@ You can choose between xyz-position based, vision-based and audio-based RL. --- 
 
 
 ## 🔥 News
-
-- [2025-06-17] Revolving task-model classes
+- [2025-06-30] Added task-model classes for audio-modality
+- [2025-06-17] Revolving task-model classes 
 - [2025-06-14] Focus on the bare necessities
 - [2025-06-13] Set up the repository
 
