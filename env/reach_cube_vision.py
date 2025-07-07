@@ -9,7 +9,7 @@ from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 
 class ReachCubeVisionEnv:
 
-    def __init__(self, vis, device, num_envs=1, randomize_every=100):
+    def __init__(self, vis, device, num_envs=1, randomize_every=2):
         self.device = device
         self.num_envs = num_envs
         self.randomize_every = randomize_every
