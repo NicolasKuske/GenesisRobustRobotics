@@ -184,6 +184,8 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
+
+
     def reset(self) -> torch.Tensor:
         """
         Reset the env: randomize the cube, re-init the robot, clear history,
@@ -228,6 +230,8 @@ class ReachCubeEgoAudioStackedEnv:
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
         return obs
+
+
 
     def step(self, actions: torch.Tensor):
         """
@@ -275,6 +279,8 @@ class ReachCubeEgoAudioStackedEnv:
         dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, rewards, dones
+
+
 
     def _plot_stacked(self, data: torch.Tensor):
         """
