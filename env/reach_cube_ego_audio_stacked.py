@@ -1,3 +1,6 @@
+#reach_cube_ego_audio_stacked.py
+
+
 import numpy as np
 import genesis as gs
 import torch
@@ -295,6 +298,7 @@ class ReachCubeEgoAudioStackedEnv:
         plt.draw()
         plt.pause(0.01)
         self._fig.canvas.flush_events()
+
 
 
 if __name__ == "__main__":
