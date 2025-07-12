@@ -1,6 +1,3 @@
-#reach_cube_ego_audio_stacked.py
-
-
 import numpy as np
 import genesis as gs
 import torch
@@ -187,8 +184,6 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
-
-
     def reset(self) -> torch.Tensor:
         """
         Reset the env: randomize the cube, re-init the robot, clear history,
@@ -233,8 +228,6 @@ class ReachCubeEgoAudioStackedEnv:
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
         return obs
-
-
 
     def step(self, actions: torch.Tensor):
         """
@@ -283,8 +276,6 @@ class ReachCubeEgoAudioStackedEnv:
 
         return obs, rewards, dones
 
-
-
     def _plot_stacked(self, data: torch.Tensor):
         """
         Render the stacked spectrogram in the live preview figure.
@@ -298,7 +289,6 @@ class ReachCubeEgoAudioStackedEnv:
         plt.draw()
         plt.pause(0.01)
         self._fig.canvas.flush_events()
-
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ class ReachCubePositionEnv:
         self.action_space = 6  # output dimension: ±x, ±y, ±z
 
         self.scene = gs.Scene(
-            show_FPS=False,  # Don't show simulation speed
+            #show_FPS=False,  # Don't show simulation speed
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),        # x, y, z
                 camera_lookat=(0.0, 0.0, 0.5), # focus point

@@ -16,7 +16,8 @@ from env import *
 # map task names to env classes
 task_to_class = {
     'ReachCubePosition': ReachCubePositionEnv,
-    'ReachCubePositionStacked': ReachCubePositionStackedEnv
+    'ReachCubePositionStacked': ReachCubePositionStackedEnv,
+    'ReachFixedCubeDirectJointControl': ReachFixedCubeDirectJointControlEnv
 }
 
 def create_environment(task_name):
