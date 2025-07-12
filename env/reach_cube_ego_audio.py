@@ -159,7 +159,7 @@ class ReachCubeEgoAudioEnv:
         self.episode_count += 1
         if self.episode_count == 1:
             # fixed start
-            one_pos = np.array([0.65, 0.0, 0.02]).reshape(1,3)
+            one_pos = np.array([0.65, 0.0, 0.1]).reshape(1,3)
             self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
         elif self.episode_count % self.randomize_every == 0:
             # subsequent randomizations

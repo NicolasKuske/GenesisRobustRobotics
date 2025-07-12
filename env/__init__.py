@@ -19,3 +19,7 @@ from .reach_cube_ego_audio_stacked import ReachCubeEgoAudioStackedEnv
 
 #both end effector vision and microphone
 from .reach_cube_ego_multimodal_stacked import ReachCubeEgoMultimodalStackedEnv
+
+
+#directJointcontrol
+from .reach_fixed_cube_directJointcontrol import ReachFixedCubeDirectJointControlEnv
