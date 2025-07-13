@@ -1,84 +1,160 @@
-#algo/ppo_agent_position.py
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
-import argparse
-from network.ppo_position import PPOposition
+from typing import NamedTuple, Optional
+
+# A simple container for rollout data
+class RolloutBatch(NamedTuple):
+    states: torch.Tensor       # [T+1, N, state_dim]
+    actions: torch.Tensor      # [T,   N]
+    log_probs: torch.Tensor    # [T,   N]
+    values: torch.Tensor       # [T+1, N]
+    rewards: torch.Tensor      # [T,   N]
+    dones: torch.Tensor        # [T,   N]
 
 class PPOAgentPosition:
-    def __init__(self, input_dim, output_dim, lr, gamma, clip_epsilon, device, load=False, num_envs=1, hidden_dim=64, checkpoint_path=None):
-        self.device = device
-        self.num_envs = num_envs
-        self.model = PPOposition(input_dim, output_dim, hidden_dim).to(self.device)
-        self.checkpoint_path = checkpoint_path
-        if load: 
-            self.load_checkpoint()
-            print("Loaded model from checkpoint")
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+    def __init__(
+        self,
+        input_dim: int,
+        action_dim: int,
+        hidden_dim: int = 64,
+        lr: float = 3e-4,
+        gamma: float = 0.99,
+        lam: float = 0.95,
+        clip_epsilon: float = 0.2,
+        epochs: int = 10,
+        batch_size: int = 64,
+        value_coef: float = 0.5,
+        entropy_coef: float = 0.01,
+        device: Optional[str] = 'cpu',
+        checkpoint_path: Optional[str] = None,
+        load: bool = False,
+    ):
+        self.device = torch.device(device)
         self.gamma = gamma
+        self.lam = lam
         self.clip_epsilon = clip_epsilon
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.value_coef = value_coef
+        self.entropy_coef = entropy_coef
+
+        # policy + value network
+        from network.ppo_position import PPOposition
+        self.model = PPOposition(input_dim, action_dim, hidden_dim).to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+
+        # checkpoint
+        self.checkpoint_path = checkpoint_path
+        if load and checkpoint_path:
+            self.load_checkpoint()
 
     def save_checkpoint(self):
-        checkpoint = {
-            'model_state_dict': self.model.state_dict()
-        }
-        torch.save(checkpoint, self.checkpoint_path)
-        print(f"Checkpoint saved to {self.checkpoint_path}")
+        torch.save({'model_state_dict': self.model.state_dict()}, self.checkpoint_path)
+        print(f"Saved checkpoint to {self.checkpoint_path}")
 
     def load_checkpoint(self):
-        checkpoint = torch.load(self.checkpoint_path, map_location=torch.device(self.device))
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.model.eval()
-        print(f"Checkpoint loaded from {self.checkpoint_path}")
+        ckpt = torch.load(self.checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(ckpt['model_state_dict'])
+        print(f"Loaded checkpoint from {self.checkpoint_path}")
 
-    def select_action(self, state):
-        with torch.no_grad():
-            logits = self.model(state)
-        probs = nn.functional.softmax(logits, dim=-1)
+    def select_action(self, state: torch.Tensor):
+        """
+        Given a state tensor [N, state_dim], returns action, its log prob, entropy, and value.
+        """
+        state = state.to(self.device)
+        logits, value = self.model(state)
+        probs = torch.softmax(logits, dim=-1)
         dist = Categorical(probs)
         action = dist.sample()
-        return action
+        log_prob = dist.log_prob(action)
+        entropy = dist.entropy()
+        return action, log_prob, entropy, value
 
-    def train(self, states, actions, rewards, dones):
-        # Convert lists to tensors
-        states_tensor = torch.stack(states).to(self.device)
-        actions_tensor = torch.stack(actions).to(self.device)
-        
-        # Calculate discounted rewards
-        discounted_rewards = []
-        R = 0
-        for reward in reversed(rewards):
-            R = reward + self.gamma * R * (~dones[-1])
-            discounted_rewards.insert(0, R)
+    def compute_gae(self, rewards, values, dones, next_value):
+        """
+        Compute GAE advantages and returns.
 
-        discounted_rewards_tensor = torch.stack(discounted_rewards).to(self.device)
+        rewards: [T, N]
+        values:  [L, N]  (should be T+1, but may be off by 1)
+        dones:   [T, N]
+        next_value: [N]
+        """
+        T, N = rewards.shape
 
-        # Normalize the rewards
-        advantages = discounted_rewards_tensor - discounted_rewards_tensor.mean()
-        
-        # Update policy using PPO
-        for _ in range(10):  # Number of epochs for each batch update
-            logits_old = self.model(states_tensor).detach()
-            probs_old = nn.functional.softmax(logits_old, dim=-1)
-            
-            logits_new = self.model(states_tensor)
-            probs_new = nn.functional.softmax(logits_new, dim=-1)
+        # ensure values has shape [T+1, N]
+        if values.shape[0] > T + 1:
+            values = values[:T+1]
+        elif values.shape[0] < T + 1:
+            # append bootstrap value to make length T+1
+            values = torch.cat([values, next_value.unsqueeze(0)], dim=0)
 
-            dist_old = Categorical(probs_old)
-            dist_new = Categorical(probs_new)
+        advantages = torch.zeros_like(rewards).to(self.device)
+        gae = torch.zeros(N, device=self.device)
+        for t in reversed(range(T)):
+            mask = 1.0 - dones[t].float()
+            delta = rewards[t] + self.gamma * values[t+1] * mask - values[t]
+            gae = delta + self.gamma * self.lam * mask * gae
+            advantages[t] = gae
+        returns = advantages + values[:-1]
+        return advantages, returns
 
-            ratio = dist_new.log_prob(actions_tensor) - dist_old.log_prob(actions_tensor)
-            ratio = ratio.exp()
+    def train(self, batch: RolloutBatch):
+        """
+        Perform PPO update given a batch of rollouts.
 
-            # Calculate surrogate loss
-            surrogate_loss_1 = ratio * advantages
-            surrogate_loss_2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
-            
-            loss = -torch.min(surrogate_loss_1, surrogate_loss_2).mean()
+        batch.states   : [T+1, N, state_dim]
+        batch.actions  : [T,   N]
+        batch.log_probs: [T,   N]
+        batch.values   : [T+1, N]
+        batch.rewards  : [T,   N]
+        batch.dones    : [T,   N]
+        """
+        # get final-step value for bootstrap
+        with torch.no_grad():
+            next_value = batch.values[-1]
 
-            # Perform optimization step
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+        # compute advantages & returns (both [T, N])
+        advantages, returns = self.compute_gae(
+            batch.rewards.to(self.device),
+            batch.values.to(self.device),
+            batch.dones.to(self.device),
+            next_value.to(self.device)
+        )
+
+        # flatten [T, N] -> [T*N]
+        T, N = batch.rewards.shape
+        states   = batch.states[:-1].reshape(-1, batch.states.size(-1)).to(self.device)
+        actions  = batch.actions.reshape(-1).to(self.device)
+        old_logp = batch.log_probs.reshape(-1).to(self.device)
+        advs     = advantages.reshape(-1)
+        rets     = returns.reshape(-1)
+
+        # PPO epochs with minibatches
+        for _ in range(self.epochs):
+            idxs = torch.randperm(T * N, device=self.device)
+            for start in range(0, T * N, self.batch_size):
+                mb_idx = idxs[start:start + self.batch_size]
+                mb_states   = states[mb_idx]
+                mb_actions  = actions[mb_idx]
+                mb_old_logp = old_logp[mb_idx]
+                mb_advs     = advs[mb_idx]
+                mb_rets     = rets[mb_idx]
+
+                logits, values = self.model(mb_states)
+                dist = Categorical(torch.softmax(logits, dim=-1))
+                new_logp = dist.log_prob(mb_actions)
+                entropy = dist.entropy().mean()
+
+                ratio = (new_logp - mb_old_logp).exp()
+                s1 = ratio * mb_advs
+                s2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * mb_advs
+                policy_loss = -torch.min(s1, s2).mean()
+                value_loss = nn.functional.mse_loss(values, mb_rets)
+
+                loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
