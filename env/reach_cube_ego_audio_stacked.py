@@ -294,3 +294,4 @@ class ReachCubeEgoAudioStackedEnv:
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
     env = ReachCubeEgoAudioStackedEnv(vis=True, device=torch.device('cuda'), listen_idx=0)
+
