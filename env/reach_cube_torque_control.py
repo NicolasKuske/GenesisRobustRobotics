@@ -51,7 +51,7 @@ class ReachCubeTorqueEnv:
 
         # keeping the arm upright: positive-exponential height reward
         self.z_k = 1                   # exponential rate
-        self.z_reward_max = 0.01         # desired reward at z=1
+        self.z_reward_max = 0.01       # desired reward at z=1
         # normalization so that r_z(1) = z_reward_max
         self.z_norm_factor = 1 - np.exp(-self.z_k * 1.0)
 
@@ -100,15 +100,37 @@ class ReachCubeTorqueEnv:
         self.franka = self.scene.add_entity(
             gs.morphs.MJCF(file="../assets/xml/franka_emika_panda/panda.xml")
         )
-        # target cube with features from ego version
         self.cube = self.scene.add_entity(
             gs.morphs.Box(size=(0.06, 0.06, 0.06)),
             surface=gs.surfaces.Rough(color=(0.99, 0.82, 0.09)),
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
+
         # finalize and build N envs
         self.scene.build(n_envs=self.num_envs)
         self.envs_idx = np.arange(self.num_envs)
+
+        # --- tune PD gains on all 9 DOFs (7 arm joints + 2 fingers) ---
+        jnt_names = [
+            'joint1','joint2','joint3','joint4',
+            'joint5','joint6','joint7',
+            'finger_joint1','finger_joint2',
+        ]
+        dofs_idx = [
+            self.franka.get_joint(name).dof_idx_local
+            for name in jnt_names
+        ]
+        # PD gains (you can adjust these values)
+        kp = np.array([4500,4500,3500,3500,2000,2000,2000,100,100], dtype=np.float32)
+        kv = np.array([ 450, 450, 350, 350, 200, 200, 200,  10,  10], dtype=np.float32)
+        self.franka.set_dofs_kp(kp=kp, dofs_idx_local=dofs_idx)
+        self.franka.set_dofs_kv(kv=kv, dofs_idx_local=dofs_idx)
+        # clamp torque limits for safety
+        self.franka.set_dofs_force_range(
+            lower = np.array([-87,-87,-87,-87,-12,-12,-12,-100,-100], dtype=np.float32),
+            upper = np.array([ 87,  87,  87,  87,  12,  12,  12,  100, 100], dtype=np.float32),
+            dofs_idx_local = dofs_idx,
+        )
 
         # initial placement: sample X=0.6, Y/Z random
         self.build_env()
@@ -116,17 +138,14 @@ class ReachCubeTorqueEnv:
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
     def _sample_random_pos(self):
-        # X-coordinate under curriculum
         if self.dynamic_x:
             x = np.random.uniform(self.min_x_dynamic, self.max_x_dynamic, (self.num_envs,1))
         else:
             x = np.full((self.num_envs,1), self.fixed_x)
-        # Y from two intervals
         y_low  = np.random.uniform(self.min_y, -0.15, (self.num_envs,1))
         y_high = np.random.uniform(0.15, self.max_y, (self.num_envs,1))
         mask = np.random.rand(self.num_envs,1) < 0.5
         y = np.where(mask, y_low, y_high)
-        # Z
         z = np.random.uniform(self.min_z, self.max_z, (self.num_envs,1))
         return np.concatenate([x, y, z], axis=1)
 
@@ -138,7 +157,7 @@ class ReachCubeTorqueEnv:
         ).unsqueeze(0).repeat(self.num_envs, 1)
         self.franka.set_qpos(q0, envs_idx=self.envs_idx)
         self.scene.step()
-        # lock fingers
+        # lock fingers only
         self.fixed_finger_pos = q0[:, 7:9].clone()
         self.franka.set_dofs_kp(
             kp=np.array([100,100]), dofs_idx_local=self.fixed_finger_pos.new_tensor([7,8]).cpu().numpy()
@@ -153,7 +172,6 @@ class ReachCubeTorqueEnv:
         )
 
     def reset(self):
-        # report shaping + bonus + height reward and apply curriculum thresholds
         if self.episode_count > 0:
             shaping   = self.sum_delta.cpu().mean().item()
             bonus     = self.sum_success.cpu().mean().item()
@@ -185,7 +203,7 @@ class ReachCubeTorqueEnv:
                         self.min_x_dynamic = self.fixed_x - 0.2 * self.x_stage
                         self.last_episode_rewards.clear()
                         if self.x_stage == len(self.reward_thresholds):
-                            print(f"[Env] Passed final threshold (>"+str(thresh)+"). Curriculum complete.")
+                            print(f"[Env] Passed final threshold (>{thresh}). Curriculum complete.")
                             self.completed = True
                         else:
                             print(
@@ -198,7 +216,6 @@ class ReachCubeTorqueEnv:
                                     f"[Env] Now in final stage: mean > {final_t:.4f} (over {self.window_size}) to finish."
                                 )
 
-        # start next episode
         self.episode_count += 1
         self.sum_delta   = torch.zeros(self.num_envs, device=self.device)
         self.sum_success = torch.zeros(self.num_envs, device=self.device)
@@ -223,7 +240,6 @@ class ReachCubeTorqueEnv:
         return state
 
     def step(self, actions):
-        # apply continuous torques
         torque = actions.clamp(-1.0, 1.0) * self.max_torque
         forces = torque.cpu().numpy()
         self.franka.control_dofs_force(
@@ -231,17 +247,14 @@ class ReachCubeTorqueEnv:
             dofs_idx_local=np.arange(7),
             envs_idx=self.envs_idx
         )
-        # lock fingers
         self.franka.control_dofs_position(
             self.fixed_finger_pos,
             torch.arange(7, 9, device=self.device),
             self.envs_idx
         )
 
-        # advance simulation
         self.scene.step()
 
-        # observe cube & gripper
         obj  = self.cube.get_pos()
         grip = (
             self.franka.get_link("left_finger").get_pos() +
@@ -249,7 +262,6 @@ class ReachCubeTorqueEnv:
         ) * 0.5
         state = torch.concat([obj, grip], dim=1)
 
-        # distance-based shaping
         dist_new = torch.norm(obj - grip, dim=1)
         dist_old = self.prev_dist
         if self.shaping_type == "exp":
@@ -260,22 +272,16 @@ class ReachCubeTorqueEnv:
         else:
             delta = self.shaping_coef * (dist_old - dist_new)
 
-        # success bonus
         success = dist_new < self.success_thresh
         bonus   = success.to(delta.dtype) * self.success_bonus
 
-        # height-based exponential reward term
         z_val = obj[:, 2]
         z_term = (1 - torch.exp(-self.z_k * z_val)) / self.z_norm_factor
         z_term *= self.z_reward_max
 
-        # total reward
         reward = delta + bonus - z_term
-
-        # done on success
         dones = success
 
-        # accumulate for curriculum
         self.sum_delta   += delta
         self.sum_success += bonus
         self.sum_z       += z_term
