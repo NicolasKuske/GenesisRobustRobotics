@@ -9,7 +9,7 @@ class ReachCubeTorqueEnv:
         vis,
         device,
         num_envs=1,
-        episodes_per_position=1,
+        episodes_per_position=3,
         window_size=4,
         reward_thresholds=[3, 3.5, 3.5, 3.5, 3.5, 3.5, 4]
     ):
@@ -80,7 +80,6 @@ class ReachCubeTorqueEnv:
             vis_options=gs.options.VisOptions(plane_reflection=True),
             renderer=gs.renderers.Rasterizer(),
         )
-        # floor and walls
         self.scene.add_entity(
             gs.morphs.Plane(), surface=gs.surfaces.Aluminium(ior=10.0)
         )
@@ -120,25 +119,24 @@ class ReachCubeTorqueEnv:
         self.kv = np.array([ 450, 450, 350, 350, 200, 200, 200,  10,  10], dtype=np.float32)
         self.force_lower = np.array([-87,-87,-87,-87,-12,-12,-12,-100,-100], dtype=np.float32)
         self.force_upper = np.array([ 87,  87,  87,  87,  12,  12,  12,  100, 100], dtype=np.float32)
-        # reset pose q0
         self.reset_q = torch.tensor(
             [-1.0, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.01, 0.01],
             dtype=torch.float32, device=self.device
         )
 
-        # initial placement & gravity compensation baseline
+        # initial placement & gravity compensation
         self.build_env()
         self.current_cube_pos = self._sample_random_pos()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
-        # compute gravity torques by running PD controller once
+        # batch q reset for PD position call
+        batch_q = self.reset_q.unsqueeze(0).repeat(self.num_envs, 1).cpu().numpy()
         self.franka.control_dofs_position(
-            self.reset_q.cpu().numpy(),
+            batch_q,
             dofs_idx_local=self.dofs_idx,
             envs_idx=self.envs_idx
         )
         self.scene.step()
         pd_torques = self.franka.get_dofs_control_force(self.dofs_idx)
-        # store only first 7 arm torques for compensation
         self.gravity_torque = pd_torques[:, :7].cpu().numpy()
 
     def _sample_random_pos(self):
@@ -154,12 +152,10 @@ class ReachCubeTorqueEnv:
         return np.concatenate([x, y, z], axis=1)
 
     def build_env(self):
-        # reset to home pose
         q0 = self.reset_q.unsqueeze(0).repeat(self.num_envs, 1)
         self.franka.set_qpos(q0, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # reapply PD gains
         self.franka.set_dofs_kp(kp=self.kp, dofs_idx_local=self.dofs_idx)
         self.franka.set_dofs_kv(kv=self.kv, dofs_idx_local=self.dofs_idx)
         self.franka.set_dofs_force_range(
@@ -168,8 +164,14 @@ class ReachCubeTorqueEnv:
             dofs_idx_local=self.dofs_idx
         )
 
-        # lock fingers
         finger_idx = np.array(self.dofs_idx[7:], dtype=int)
+        # batch finger targets
+        finger_target = np.tile(self.reset_q.cpu().numpy()[7:], (self.num_envs, 1))
+        self.franka.control_dofs_position(
+            finger_target,
+            dofs_idx_local=finger_idx,
+            envs_idx=self.envs_idx
+        )
         self.franka.set_dofs_kp(kp=np.array([100,100],dtype=np.float32), dofs_idx_local=finger_idx)
         self.franka.set_dofs_kv(kv=np.array([10,10],dtype=np.float32), dofs_idx_local=finger_idx)
         self.franka.set_dofs_force_range(
@@ -179,7 +181,6 @@ class ReachCubeTorqueEnv:
         )
 
     def reset(self):
-        # report previous episode
         if self.episode_count > 0:
             shaping   = self.sum_delta.cpu().mean().item()
             bonus     = self.sum_success.cpu().mean().item()
@@ -189,56 +190,52 @@ class ReachCubeTorqueEnv:
             self.last_episode_rewards.append(ep_reward)
             # curriculum logic ...
 
-        # start next
         self.episode_count += 1
         self.sum_delta   = torch.zeros(self.num_envs, device=self.device)
         self.sum_success = torch.zeros(self.num_envs, device=self.device)
         self.sum_z       = torch.zeros(self.num_envs, device=self.device)
 
-        # resample cube if needed
         if (self.episode_count - 1) % self.episodes_per_position == 0:
             self.current_cube_pos = self._sample_random_pos()
             print(f"[Episode {self.episode_count}] Cube X-positions: {self.current_cube_pos[:,0]}")
 
-        # reset scene and cube
         self.build_env()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
-        # get initial state
         obj  = self.cube.get_pos()
         grip = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos()) * 0.5
         self.prev_dist = torch.norm(obj - grip, dim=1)
         return torch.concat([obj, grip], dim=1)
 
     def step(self, actions):
-        # raw policy torques
         torque = actions.clamp(-1.0,1.0) * self.max_torque
-        # add gravity compensation
         total_torque = torque.cpu().numpy() + self.gravity_torque
         self.franka.control_dofs_force(
             total_torque,
             dofs_idx_local=np.arange(7),
             envs_idx=self.envs_idx
         )
-        # lock fingers
+        # batch finger lock to avoid warning
+        finger_idx = np.array(self.dofs_idx[7:], dtype=int)
+        finger_target = np.tile(self.reset_q.cpu().numpy()[7:], (self.num_envs, 1))
         self.franka.control_dofs_position(
-            self.reset_q.cpu().numpy()[7:],
-            dofs_idx_local=np.array(self.dofs_idx[7:],dtype=int),
+            finger_target,
+            dofs_idx_local=finger_idx,
             envs_idx=self.envs_idx
         )
-        # advance sim
         self.scene.step()
 
-        # observations
         obj  = self.cube.get_pos()
         grip = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos()) * 0.5
         state = torch.concat([obj, grip], dim=1)
 
-        # rewards and done as before
         dist_new = torch.norm(obj - grip, dim=1)
         dist_old = self.prev_dist
         if self.shaping_type == "exp":
-            delta = self.shaping_coef * (torch.exp(-self.k*(dist_new-self.dist_offset)) - torch.exp(-self.k*(dist_old-self.dist_offset)))
+            delta = self.shaping_coef * (
+                torch.exp(-self.k*(dist_new-self.dist_offset)) -
+                torch.exp(-self.k*(dist_old-self.dist_offset))
+            )
         else:
             delta = self.shaping_coef * (dist_old - dist_new)
         success = dist_new < self.success_thresh
@@ -247,7 +244,6 @@ class ReachCubeTorqueEnv:
         reward  = delta + bonus - z_term
         dones   = success
 
-        # accumulate
         self.sum_delta   += delta
         self.sum_success += bonus
         self.sum_z       += z_term
@@ -260,3 +256,4 @@ if __name__ == "__main__":
     env = ReachCubeTorqueEnv(vis=True, device="cuda")
     s = env.reset()
     print("Initial state:", s)
+
