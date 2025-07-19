@@ -1,3 +1,6 @@
+#algo/ppo_agent_position.py
+
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -101,16 +104,6 @@ class PPOAgentPosition:
         return advantages, returns
 
     def train(self, batch: RolloutBatch):
-        """
-        Perform PPO update given a batch of rollouts.
-
-        batch.states   : [T+1, N, state_dim]
-        batch.actions  : [T,   N]
-        batch.log_probs: [T,   N]
-        batch.values   : [T+1, N]
-        batch.rewards  : [T,   N]
-        batch.dones    : [T,   N]
-        """
         # get final-step value for bootstrap
         with torch.no_grad():
             next_value = batch.values[-1]
@@ -123,24 +116,27 @@ class PPOAgentPosition:
             next_value.to(self.device)
         )
 
+        # advantage normalization (insert exactly here!)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
         # flatten [T, N] -> [T*N]
         T, N = batch.rewards.shape
-        states   = batch.states[:-1].reshape(-1, batch.states.size(-1)).to(self.device)
-        actions  = batch.actions.reshape(-1).to(self.device)
+        states = batch.states[:-1].reshape(-1, batch.states.size(-1)).to(self.device)
+        actions = batch.actions.reshape(-1).to(self.device)
         old_logp = batch.log_probs.reshape(-1).to(self.device)
-        advs     = advantages.reshape(-1)
-        rets     = returns.reshape(-1)
+        advs = advantages.reshape(-1)
+        rets = returns.reshape(-1)
 
-        # PPO epochs with minibatches
+        # PPO epochs with minibatches (unchanged)
         for _ in range(self.epochs):
             idxs = torch.randperm(T * N, device=self.device)
             for start in range(0, T * N, self.batch_size):
                 mb_idx = idxs[start:start + self.batch_size]
-                mb_states   = states[mb_idx]
-                mb_actions  = actions[mb_idx]
+                mb_states = states[mb_idx]
+                mb_actions = actions[mb_idx]
                 mb_old_logp = old_logp[mb_idx]
-                mb_advs     = advs[mb_idx]
-                mb_rets     = rets[mb_idx]
+                mb_advs = advs[mb_idx]
+                mb_rets = rets[mb_idx]
 
                 logits, values = self.model(mb_states)
                 dist = Categorical(torch.softmax(logits, dim=-1))
