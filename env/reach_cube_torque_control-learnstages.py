@@ -38,17 +38,7 @@ class ReachCubeTorqueEnv:
         self.min_x_dynamic = self.fixed_x
         self.max_x_dynamic = self.fixed_x
         self.x_stage = 0
-
-        # compute how many 0.2-steps from 0.6 down to –0.6
         self.max_stages = int((self.fixed_x - (-0.6)) / 0.2)
-
-        # ─── OVERRIDE: jump straight to full random X range (stage 6) ───
-        self.x_stage = self.max_stages
-        self.dynamic_x = True
-        # now min_x_dynamic = 0.6 - 0.2*6 = -0.6
-        self.min_x_dynamic = self.fixed_x - 0.2 * self.x_stage
-        # ──────────────────────────────────────────────────────────────
-
         self.completed = False
 
         # success & shaping parameters
