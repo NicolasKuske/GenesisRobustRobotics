@@ -11,7 +11,7 @@ class ReachCubeTorqueEnv:
         num_envs=1,
         episodes_per_position=1,
         window_size=4,
-        reward_thresholds=[3, 3.5, 3.5, 3.5, 3.5, 3.5, 4]
+        reward_thresholds=[3, 3, 3, 3, 3.5, 3.5, 3.5]
     ):
         self.device = device
         self.num_envs = num_envs
