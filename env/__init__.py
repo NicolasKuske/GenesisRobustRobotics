@@ -23,3 +23,4 @@ from .reach_cube_ego_multimodal_stacked import ReachCubeEgoMultimodalStackedEnv
 
 #directJointcontrol
 from .reach_fixed_cube_directJointcontrol import ReachFixedCubeDirectJointControlEnv
+from .reach_cube_torque_control import ReachCubeTorqueEnv

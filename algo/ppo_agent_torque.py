@@ -1,36 +1,34 @@
-#algo/ppo_agent_position.py
-
+# algo/ppo_agent_torque.py
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import Categorical
+from torch.distributions import Normal
 from typing import NamedTuple, Optional
 
-# A simple container for rollout data
 class RolloutBatch(NamedTuple):
     states: torch.Tensor       # [T+1, N, state_dim]
-    actions: torch.Tensor      # [T,   N]
-    log_probs: torch.Tensor    # [T,   N]
+    actions: torch.Tensor      # [T, N, action_dim]
+    log_probs: torch.Tensor    # [T, N]
     values: torch.Tensor       # [T+1, N]
-    rewards: torch.Tensor      # [T,   N]
-    dones: torch.Tensor        # [T,   N]
+    rewards: torch.Tensor      # [T, N]
+    dones: torch.Tensor        # [T, N]
 
-class PPOAgentPosition:
+class PPOAgentTorque:
     def __init__(
         self,
         input_dim: int,
         action_dim: int,
-        hidden_dim: int = 64,
-        lr: float = 3e-4,
+        hidden_dim: int = 128,
+        lr: float = 1e-4,
         gamma: float = 0.99,
         lam: float = 0.95,
         clip_epsilon: float = 0.2,
         epochs: int = 10,
         batch_size: int = 64,
         value_coef: float = 0.5,
-        entropy_coef: float = 0.01,
-        device: Optional[str] = 'cpu',
+        entropy_coef: float = 0.001,
+        device: Optional[str] = 'cuda',
         checkpoint_path: Optional[str] = None,
         load: bool = False,
     ):
@@ -43,12 +41,12 @@ class PPOAgentPosition:
         self.value_coef = value_coef
         self.entropy_coef = entropy_coef
 
-        # policy + value network
-        from network.ppo_position import PPOposition
-        self.model = PPOposition(input_dim, action_dim, hidden_dim).to(self.device)
+        # Import PPO torque network
+        from network.ppo_torque_control import PPOContinuousTorque
+        self.model = PPOContinuousTorque(input_dim, action_dim, hidden_dim).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
-        # checkpoint
+        # Checkpoint
         self.checkpoint_path = checkpoint_path
         if load and checkpoint_path:
             self.load_checkpoint()
@@ -63,34 +61,20 @@ class PPOAgentPosition:
         print(f"Loaded checkpoint from {self.checkpoint_path}")
 
     def select_action(self, state: torch.Tensor):
-        """
-        Given a state tensor [N, state_dim], returns action, its log prob, entropy, and value.
-        """
         state = state.to(self.device)
-        logits, value = self.model(state)
-        probs = torch.softmax(logits, dim=-1)
-        dist = Categorical(probs)
+        action_mean, action_std, value = self.model(state)
+        dist = Normal(action_mean, action_std)
         action = dist.sample()
-        log_prob = dist.log_prob(action)
-        entropy = dist.entropy()
+        log_prob = dist.log_prob(action).sum(dim=-1)
+        entropy = dist.entropy().sum(dim=-1)
         return action, log_prob, entropy, value
 
     def compute_gae(self, rewards, values, dones, next_value):
-        """
-        Compute GAE advantages and returns.
-
-        rewards: [T, N]
-        values:  [L, N]  (should be T+1, but may be off by 1)
-        dones:   [T, N]
-        next_value: [N]
-        """
         T, N = rewards.shape
 
-        # ensure values has shape [T+1, N]
         if values.shape[0] > T + 1:
             values = values[:T+1]
         elif values.shape[0] < T + 1:
-            # append bootstrap value to make length T+1
             values = torch.cat([values, next_value.unsqueeze(0)], dim=0)
 
         advantages = torch.zeros_like(rewards).to(self.device)
@@ -104,11 +88,9 @@ class PPOAgentPosition:
         return advantages, returns
 
     def train(self, batch: RolloutBatch):
-        # get final-step value for bootstrap
         with torch.no_grad():
             next_value = batch.values[-1]
 
-        # compute advantages & returns (both [T, N])
         advantages, returns = self.compute_gae(
             batch.rewards.to(self.device),
             batch.values.to(self.device),
@@ -116,18 +98,15 @@ class PPOAgentPosition:
             next_value.to(self.device)
         )
 
-        # advantage normalization (insert exactly here!)
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # flatten [T, N] -> [T*N]
         T, N = batch.rewards.shape
         states = batch.states[:-1].reshape(-1, batch.states.size(-1)).to(self.device)
-        actions = batch.actions.reshape(-1).to(self.device)
+        actions = batch.actions.reshape(-1, batch.actions.size(-1)).to(self.device)
         old_logp = batch.log_probs.reshape(-1).to(self.device)
         advs = advantages.reshape(-1)
         rets = returns.reshape(-1)
 
-        # PPO epochs with minibatches (unchanged)
         for _ in range(self.epochs):
             idxs = torch.randperm(T * N, device=self.device)
             for start in range(0, T * N, self.batch_size):
@@ -138,10 +117,10 @@ class PPOAgentPosition:
                 mb_advs = advs[mb_idx]
                 mb_rets = rets[mb_idx]
 
-                logits, values = self.model(mb_states)
-                dist = Categorical(torch.softmax(logits, dim=-1))
-                new_logp = dist.log_prob(mb_actions)
-                entropy = dist.entropy().mean()
+                action_mean, action_std, values = self.model(mb_states)
+                dist = Normal(action_mean, action_std)
+                new_logp = dist.log_prob(mb_actions).sum(dim=-1)
+                entropy = dist.entropy().sum(dim=-1).mean()
 
                 ratio = (new_logp - mb_old_logp).exp()
                 s1 = ratio * mb_advs
