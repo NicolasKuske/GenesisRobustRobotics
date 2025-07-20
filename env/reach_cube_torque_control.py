@@ -6,12 +6,16 @@ from collections import deque
 class ReachCubeTorqueEnv:
     """
     Robotic environment where a Franka arm reaches for a cube with a curriculum on X-axis sampling.
-    Curriculum stages:
-      0: fixed X=0.6
-      1: X ∈ [0.3, 0.6]
-      2: X ∈ [0.1, 0.6]
-      3: X ∈ [-0.2, 0.6]
-      4: X ∈ [-0.6, 0.6]
+
+    Curriculum stages (lower bound → 0.6):
+      Stage 0: X ∈ [0.4, 0.6]
+      Stage 1: X ∈ [0.2, 0.6]
+      Stage 2: X ∈ [0.0, 0.6]
+      Stage 3: X ∈ [-0.2, 0.6]
+      Stage 4: X ∈ [-0.4, 0.6]
+      Stage 5: X ∈ [-0.6, 0.6]
+
+    Final stability round (Stage 6): same bounds as Stage 5 ([-0.6, 0.6]), but uses the same window size for evaluation.
     """
 
     def __init__(
@@ -19,17 +23,22 @@ class ReachCubeTorqueEnv:
         vis: bool,
         device: str,
         num_envs: int = 1,
-        episodes_per_position: int = 1,
-        window_size: int = 5,
-        reward_thresholds: list = None,
+        episodes_per_position: int = 3,
+        window_size: int = 4,
+        reward_thresholds: list = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 3.5]
     ):
         # Basic settings
         self.device = device
         self.num_envs = num_envs
         self.episodes_per_position = episodes_per_position
+
+        # Constant window size for all stages (including stability)
         self.window_size = window_size
-        # thresholds: one per stage 1-4, plus final stability
-        self.reward_thresholds = reward_thresholds or [1.5, 2, 3.0, 3.5, 3.5]
+        self.last_rewards = deque(maxlen=self.window_size)
+
+        # thresholds: one per stage 0–5 plus final stability = 7 entries
+        # if you pass reward_thresholds, make sure it has length ≥ 7
+        self.reward_thresholds = reward_thresholds
 
         # Observation/action dimensions
         self.state_dim = 6
@@ -41,10 +50,11 @@ class ReachCubeTorqueEnv:
 
         # Curriculum X-axis settings
         self.fixed_x = 0.6
-        self.x_bounds = [0.6, 0.3, 0.1, -0.2, -0.6]
-        self.max_stages = len(self.x_bounds) - 1
+        # six progressive lower bounds
+        self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
+        # stage indices: 0..5 are the six stages, 6 is final stability
+        self.max_stages = len(self.x_bounds)
         self.x_stage = 0
-        self.dynamic_x = False
         self.completed = False
 
         # Reward shaping parameters
@@ -57,7 +67,6 @@ class ReachCubeTorqueEnv:
 
         # Episode trackers
         self.episode_count = 0
-        self.last_rewards = deque(maxlen=self.window_size)
         self.prev_dist = None
         self.sum_delta = None
         self.sum_success = None
@@ -109,15 +118,15 @@ class ReachCubeTorqueEnv:
 
     def _sample_cube_pos(self) -> np.ndarray:
         """Random cube position based on curriculum stage."""
-        if self.dynamic_x and 0 < self.x_stage <= self.max_stages:
-            lower = self.x_bounds[self.x_stage]
-            x = np.random.uniform(lower, self.fixed_x, (self.num_envs,1))
-        else:
-            x = np.full((self.num_envs,1), self.fixed_x)
+        # pick lower bound from x_bounds, saturating at last entry for stability
+        lower = self.x_bounds[min(self.x_stage, len(self.x_bounds)-1)]
+        x = np.random.uniform(lower, self.fixed_x, (self.num_envs,1))
+
         y_low = np.random.uniform(self.min_y, -0.15, (self.num_envs,1))
         y_high = np.random.uniform(0.15, self.max_y, (self.num_envs,1))
         mask = np.random.rand(self.num_envs,1) < 0.5
         y = np.where(mask, y_low, y_high)
+
         z = np.random.uniform(self.min_z, self.max_z, (self.num_envs,1))
         return np.hstack((x,y,z))
 
@@ -142,16 +151,20 @@ class ReachCubeTorqueEnv:
         self.episode_count += 1
         self.sum_delta = torch.zeros(self.num_envs, device=self.device)
         self.sum_success = torch.zeros(self.num_envs, device=self.device)
+
         # resample cube every few episodes
         if (self.episode_count-1) % self.episodes_per_position == 0:
             self.current_cube_pos = self._sample_cube_pos()
+
         self.build_env()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
+
         # initial observation
         obj = self.cube.get_pos()
-        grip = 0.5*(self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos())
-        self.prev_dist = torch.norm(obj-grip, dim=1)
-        return torch.cat((obj,grip), dim=1)
+        grip = 0.5*(self.franka.get_link("left_finger").get_pos() +
+                    self.franka.get_link("right_finger").get_pos())
+        self.prev_dist = torch.norm(obj - grip, dim=1)
+        return torch.cat((obj, grip), dim=1)
 
     def _process_episode_end(self):
         shaping = self.sum_delta.mean().item()
@@ -159,46 +172,69 @@ class ReachCubeTorqueEnv:
         ep_reward = shaping + bonus
         print(f"[Episode {self.episode_count}] Shaping: {shaping:.4f}, Bonus: {bonus:.4f}, Total: {ep_reward:.4f}")
         self.last_rewards.append(ep_reward)
+
         if len(self.last_rewards) == self.window_size:
             mean_r = np.mean(self.last_rewards)
-            thresh = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds)-1)]
+            # pick threshold, saturating at last entry
+            thr_idx = min(self.x_stage, len(self.reward_thresholds)-1)
+            thresh = self.reward_thresholds[thr_idx]
             print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thresh:.4f}")
             if mean_r > thresh:
                 self._advance_stage()
 
     def _advance_stage(self):
-        """Progress curriculum or mark completion."""
+        """Progress through the six stages and then stability round."""
         self.x_stage += 1
-        if self.x_stage > self.max_stages:
-            self.x_stage = self.max_stages
-            self.completed = True
-            print("[Env] Curriculum complete!")
-        else:
-            self.dynamic_x = True
+
+        if self.x_stage < self.max_stages:
             lower = self.x_bounds[self.x_stage]
             print(f"[Env] Advanced to stage {self.x_stage}: X ∈ [{lower:.2f}, {self.fixed_x:.2f}]")
             self.last_rewards.clear()
 
+        elif self.x_stage == self.max_stages:
+            # final stability round
+            lower = self.x_bounds[-1]
+            print(f"[Env] Advanced to FINAL stability round (stage {self.x_stage}): X ∈ [{lower:.2f}, {self.fixed_x:.2f}]")
+            self.last_rewards.clear()
+
+        else:
+            # beyond final stability → done
+            self.completed = True
+            print("[Env] Curriculum complete!")
+
     def step(self, actions: torch.Tensor):
         torque = actions.clamp(-1.0,1.0) * self.max_torque
-        self.franka.control_dofs_force(torque.cpu().numpy(), dofs_idx_local=np.arange(7), envs_idx=self.envs_idx)
-        self.franka.control_dofs_position(self.fixed_finger_pos, torch.arange(7,9,device=self.device), envs_idx=self.envs_idx)
+        self.franka.control_dofs_force(torque.cpu().numpy(),
+                                       dofs_idx_local=np.arange(7),
+                                       envs_idx=self.envs_idx)
+        self.franka.control_dofs_position(self.fixed_finger_pos,
+                                          torch.arange(7,9,device=self.device),
+                                          envs_idx=self.envs_idx)
         self.scene.step()
+
         obj = self.cube.get_pos()
-        grip = 0.5*(self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos())
-        dist_new = torch.norm(obj-grip, dim=1)
+        grip = 0.5*(self.franka.get_link("left_finger").get_pos() +
+                    self.franka.get_link("right_finger").get_pos())
+        dist_new = torch.norm(obj - grip, dim=1)
+
         if self.shaping_type == "exp":
-            delta = self.shaping_coef*(torch.exp(-self.k*(dist_new-self.dist_offset)) - torch.exp(-self.k*(self.prev_dist-self.dist_offset)))
+            delta = self.shaping_coef * (
+                torch.exp(-self.k*(dist_new - self.dist_offset))
+                - torch.exp(-self.k*(self.prev_dist - self.dist_offset))
+            )
         else:
-            delta = self.shaping_coef*(self.prev_dist-dist_new)
+            delta = self.shaping_coef * (self.prev_dist - dist_new)
         self.prev_dist = dist_new
+
         success = (dist_new < self.success_thresh).float()
         bonus = success * self.success_bonus
+
         self.sum_delta += delta
         self.sum_success += bonus
+
         reward = delta + bonus
         done = success.bool()
-        return torch.cat((obj,grip), dim=1), reward, done
+        return torch.cat((obj, grip), dim=1), reward, done
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
