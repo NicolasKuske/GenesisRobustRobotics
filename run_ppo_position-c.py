@@ -1,8 +1,9 @@
-# run_ppo_torque.py
+# run_ppo_position-c.py (refactored)
 
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
+
 import sys
 import argparse
 import genesis as gs
@@ -143,7 +144,7 @@ def parse_args():
     p.add_argument('-n', '--num_envs', type=int, default=1, help='Parallel environments')
     p.add_argument('-t', '--task', type=str, default='ReachCubeTorque', help='Task name')
     p.add_argument('-d', '--device', type=str, default='cuda', help='cpu or cuda')
-    p.add_argument('-m', '--mode', choices=['train','inference'], default='train', help='Run mode')
+    p.add_argument('--mode', choices=['train','inference'], default='train', help='Run mode')
     p.add_argument('--num_episodes', type=int, default=1000,
                    help='Episodes to run in inference')
     return p.parse_args()
@@ -152,23 +153,22 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # determine checkpoint path
+    # determine checkpoint path (always save)
     default_ckpt = f"logs/{args.task}_ppo_torque_checkpoint.pth"
     if args.load_path:
         args.load = True
         args.checkpoint_path = args.load_path
-    elif args.load:
-        args.checkpoint_path = default_ckpt
     else:
-        args.checkpoint_path = None  # no loading
+        args.checkpoint_path = default_ckpt
 
     if args.load:
         print(f"[INFO] Loading checkpoint from {args.checkpoint_path}")
 
-    if args.checkpoint_path:
-        os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
-        if not os.path.isfile(args.checkpoint_path):
-            sys.exit(f"[ERROR] Checkpoint not found: {args.checkpoint_path}")
+    # ensure checkpoint directory exists
+    os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
+    # if loading, verify checkpoint file exists
+    if args.load and not os.path.isfile(args.checkpoint_path):
+        sys.exit(f"[ERROR] Checkpoint not found: {args.checkpoint_path}")
 
     # init Genesis backend
     backend = gs.cpu if args.device.lower().startswith('cpu') else gs.gpu
@@ -183,3 +183,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
