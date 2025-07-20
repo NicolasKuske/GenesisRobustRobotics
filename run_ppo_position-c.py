@@ -99,15 +99,20 @@ def inference_ppo(args):
     """
     Run PPO inference loop, sampling full X-range.
     """
-    env = ReachCubeTorqueEnv(vis=args.vis, device=args.device, num_envs=args.num_envs)
+    # set episodes_per_position=1 for inference
+    env = ReachCubeTorqueEnv(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs,
+        episodes_per_position=1
+    )
     print(f"[INFO] Inference environment: {env}")
 
-    # force full-range sampling
-    if hasattr(env, 'dynamic_x'):
-        env.dynamic_x = True
-        env.x_stage = env.max_stages
-        lower, upper = env.x_bounds[env.max_stages], env.fixed_x
-        print(f"[INFO] Inference X-range: [{lower:.2f}, {upper:.2f}]")
+    # force full-range sampling: go to the final curriculum stage
+    env.x_stage = env.max_stages
+    lower = env.x_bounds[-1]
+    upper = env.fixed_x
+    print(f"[INFO] Inference X-range: [{lower:.2f}, {upper:.2f}]")
 
     # Load agent for inference (hyperparams from checkpoint)
     agent = PPOAgentTorque(
@@ -136,6 +141,8 @@ def inference_ppo(args):
     writer.close()
 
 
+
+
 def parse_args():
     p = argparse.ArgumentParser("PPO Torque Runner")
     p.add_argument('-v', '--vis', action='store_true', help='Enable visualization')
@@ -144,7 +151,7 @@ def parse_args():
     p.add_argument('-n', '--num_envs', type=int, default=1, help='Parallel environments')
     p.add_argument('-t', '--task', type=str, default='ReachCubeTorque', help='Task name')
     p.add_argument('-d', '--device', type=str, default='cuda', help='cpu or cuda')
-    p.add_argument('--mode', choices=['train','inference'], default='train', help='Run mode')
+    p.add_argument('-m', '--mode', choices=['train','inference'], default='train', help='Run mode')
     p.add_argument('--num_episodes', type=int, default=1000,
                    help='Episodes to run in inference')
     return p.parse_args()
@@ -162,7 +169,7 @@ def main():
         args.checkpoint_path = default_ckpt
 
     if args.load:
-        print(f"[INFO] Loading checkpoint from {args.checkpoint_path}")
+        print(f"[INFO] Loading checkpoint from {args.checkpoint_path} \n")
 
     # ensure checkpoint directory exists
     os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
