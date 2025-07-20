@@ -6,7 +6,7 @@ import torch
 
 class ReachCubeTorqueEnv:
 
-    def __init__(self, vis, device, num_envs=1, randomize_every=100):
+    def __init__(self, vis, device, num_envs=1, randomize_every=3):
         self.device = device
         self.num_envs = num_envs
         self.randomize_every = randomize_every
@@ -160,7 +160,7 @@ class ReachCubeTorqueEnv:
 
         # distance‐based reward
         dist = torch.norm(object_pos - gripper_pos, dim=1)
-        base_rew = torch.exp(-4 * (dist - 0.1))
+        base_rew = torch.exp(-4 * dist)
 
         # success detection → bonus + done
         success = dist < self.success_thresh
