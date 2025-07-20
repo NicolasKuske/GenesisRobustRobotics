@@ -1,4 +1,4 @@
-#env/reach_cube_position.py
+#env/reach_cube_position_IK.py
 
 
 import numpy as np
@@ -6,7 +6,7 @@ import genesis as gs
 import torch
 from collections import deque
 
-class ReachCubePositionEnv:
+class ReachCubePositionCurrEnv:
     # Build the scene & entities
     def __init__(
         self,
@@ -15,7 +15,7 @@ class ReachCubePositionEnv:
         num_envs=1,
         episodes_per_position=3,
         window_size=4,
-        reward_thresholds=[2, 2.5, 2.5, 2.5, 2.5, 2.5, 3]
+        reward_thresholds=[2, 2.5, 3, 3, 3.5, 3.5, 3.5]
     ):
         self.device = device
         self.num_envs = num_envs
@@ -67,7 +67,7 @@ class ReachCubePositionEnv:
 
         # build the Genesis scene
         self.scene = gs.Scene(
-            show_FPS=False,
+            #show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0.0, 0.0, 0.5),
@@ -288,7 +288,7 @@ class ReachCubePositionEnv:
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
-    env = ReachCubePositionEnv(
+    env = ReachCubePositionCurrEnv(
         vis=True,
         device="cuda",
         episodes_per_position=5,

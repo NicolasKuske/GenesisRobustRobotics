@@ -1,4 +1,4 @@
-# run_ppo_position.py
+# run_ppo_position_IK.py
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
@@ -9,14 +9,12 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from algo.ppo_agent_position import PPOAgentPosition
+from algo.ppo_agent_position_IKsimple import PPOAgentPosition
 from env import *
 
 # map task names to env classes
 task_to_class = {
     'ReachCubePosition': ReachCubePositionEnv,
-    'ReachCubePositionStacked': ReachCubePositionStackedEnv,
-    'ReachFixedCubeDirectJointControl': ReachFixedCubeDirectJointControlEnv
 }
 
 def create_environment(task_name):

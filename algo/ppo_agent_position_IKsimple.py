@@ -1,11 +1,11 @@
-# algo/ppo_agent_position.py
+# algo/ppo_agent_position_IK.py
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 import argparse
-from network.ppo_position import PPOposition
+from network.ppo_position_IKsimple import PPOposition
 
 
 class PPOAgentPosition:

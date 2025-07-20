@@ -2,12 +2,12 @@
 
 
 #xzy position only
-from .reach_cube_position import ReachCubePositionEnv
-from .reach_cube_position_stacked import ReachCubePositionStackedEnv
+from .reach_cube_position_IK import ReachCubePositionCurrEnv
+from .reach_cube_position_IKsimple import ReachCubePositionEnv
 
 #third person vision only
 from .reach_cube_vision import ReachCubeVisionEnv
-from .reach_cube_vision_stacked import ReachCubeVisionStackedEnv
+from .reach_cube_vision_stacked_IKsimple import ReachCubeVisionStackedEnv
 
 #end effector ego perspective vision only
 from .reach_cube_ego_vision import ReachCubeEgoVisionEnv
@@ -22,5 +22,4 @@ from .reach_cube_ego_multimodal_stacked import ReachCubeEgoMultimodalStackedEnv
 
 
 #directJointcontrol
-from .reach_fixed_cube_directJointcontrol import ReachFixedCubeDirectJointControlEnv
 from .reach_cube_torque_control import ReachCubeTorqueEnv

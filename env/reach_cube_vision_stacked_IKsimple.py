@@ -1,4 +1,4 @@
-# reach_cube_vision_stacked.py
+# reach_cube_vision_stacked_IKsimple.py
 
 import numpy as np
 import genesis as gs

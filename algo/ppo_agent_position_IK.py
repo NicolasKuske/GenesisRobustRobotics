@@ -1,4 +1,4 @@
-#algo/ppo_agent_position.py
+#algo/ppo_agent_position_IK.py
 
 
 import torch
@@ -44,7 +44,7 @@ class PPOAgentPosition:
         self.entropy_coef = entropy_coef
 
         # policy + value network
-        from network.ppo_position import PPOposition
+        from network.ppo_position_IK import PPOposition
         self.model = PPOposition(input_dim, action_dim, hidden_dim).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 

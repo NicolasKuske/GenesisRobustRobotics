@@ -1,4 +1,4 @@
-# network/ppo_vision-o.py
+# network/ppo_vision_IKsimple.py
 
 import torch
 import torch.nn as nn
