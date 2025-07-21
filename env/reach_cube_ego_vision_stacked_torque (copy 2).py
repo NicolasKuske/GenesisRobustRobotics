@@ -19,7 +19,7 @@ class ReachCubeEgoVisionStackedTorqueEnv:
         vis: bool,
         device: torch.device,
         num_envs: int = 1,
-        episodes_per_position: int = 100,
+        episodes_per_position: int = 3,
         window_size: int = 4,
         reward_thresholds=None,
     ):
@@ -69,7 +69,7 @@ class ReachCubeEgoVisionStackedTorqueEnv:
 
         # —— build Genesis scene ——
         self.scene = gs.Scene(
-            #show_FPS=False,
+        #show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0.0, 0.0, 0.2),
@@ -80,33 +80,10 @@ class ReachCubeEgoVisionStackedTorqueEnv:
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
             show_viewer=vis,
-             vis_options=gs.options.VisOptions(plane_reflection=True),
-            renderer=gs.renderers.Rasterizer(),
         )
 
-
-        # Floor and walls (replicated across env grid)
-        self.scene.add_entity(
-            gs.morphs.Plane(),
-            surface=gs.surfaces.Aluminium(ior=10.0)
-        )
-        for pos, color, euler in [
-            ((4,  0, 1),  (0.9, 0.9, 0.9),  (0, -20,  0)),
-            ((-3, 0, 1),  (0.7, 0.7, 0.7),  (0,  20,  0)),
-            ((0, -3, 1),  (0.56,0.57,0.58),(0,  20, 90)),
-        ]:
-            self.scene.add_entity(
-                gs.morphs.Box(
-                    size=(0.1, 8, 4),
-                    pos=pos,
-                    euler=euler,
-                    collision=False
-                ),
-                surface=gs.surfaces.Rough(color=color),
-                material=gs.materials.Rigid(gravity_compensation=1.0)
-            )
-
-        # Robot and cube
+        # Add plane, robot, and cube
+        self.plane = self.scene.add_entity(gs.morphs.Plane())
         self.franka = self.scene.add_entity(gs.morphs.MJCF(
             file="../assets/xml/franka_emika_panda/panda.xml"
         ))
@@ -136,7 +113,6 @@ class ReachCubeEgoVisionStackedTorqueEnv:
 
         # Initialize robot pose
         self._init_robot()
-
 
     def _init_robot(self):
         self.motors_dof  = torch.arange(7, device=self.device)
