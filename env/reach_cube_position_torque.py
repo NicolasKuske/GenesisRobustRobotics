@@ -1,4 +1,4 @@
-# env/reach_cube_torque.py
+# env/reach_cube_position_torque.py
 
 
 import numpy as np

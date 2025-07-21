@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from network.ppo_vision_torque import PPOvision  # your conv-based PPO class
+from network.ppo_vision_IKsimple import PPOvision  # your conv-based PPO class
 
 class PPOAgentVision:
     def __init__(

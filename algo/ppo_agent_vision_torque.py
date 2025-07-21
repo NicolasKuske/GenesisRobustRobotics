@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.distributions import Normal
 from typing import NamedTuple, Optional
 
-from network.ppo_vision_torque import PPOVisionTorque  # your new conv‐Gaussian PPO network
+from network.ppo_vision_torque import PPOVisionTorque  # your new conv–Gaussian PPO network
 
 class RolloutBatch(NamedTuple):
     states:    torch.Tensor   # [T+1, N, C, H, W]
@@ -19,33 +19,33 @@ class RolloutBatch(NamedTuple):
 class PPOAgentVisionTorque:
     def __init__(
         self,
-        obs_shape: tuple,       # (C, H, W)
-        action_dim: int,        # number of torque-controlled joints
-        lr: float,
-        gamma: float,
-        lam: float,
-        clip_epsilon: float,
-        epochs: int,
-        batch_size: int,
-        value_coef: float,
-        entropy_coef: float,
-        device: str,
+        obs_shape: tuple,        # (C, H, W)
+        action_dim: int,         # number of torque-controlled joints
+        lr: float = 3e-4,
+        gamma: float = 0.99,
+        lam: float = 0.95,
+        clip_epsilon: float = 0.2,
+        epochs: int = 10,
+        batch_size: int = 64,
+        value_coef: float = 0.5,
+        entropy_coef: float = 0.01,
+        device: str = 'cuda',
         load: bool = False,
         num_envs: int = 1,
         checkpoint_path: Optional[str] = None,
     ):
-        self.device        = torch.device(device)
-        self.num_envs      = num_envs
-        self.gamma         = gamma
-        self.lam           = lam
-        self.clip_epsilon  = clip_epsilon
-        self.epochs        = epochs
-        self.batch_size    = batch_size
-        self.value_coef    = value_coef
-        self.entropy_coef  = entropy_coef
+        self.device         = torch.device(device)
+        self.num_envs       = num_envs
+        self.gamma          = gamma
+        self.lam            = lam
+        self.clip_epsilon   = clip_epsilon
+        self.epochs         = epochs
+        self.batch_size     = batch_size
+        self.value_coef     = value_coef
+        self.entropy_coef   = entropy_coef
         self.checkpoint_path = checkpoint_path
 
-        # actor–critic conv‐Gaussian network
+        # actor–critic conv–Gaussian network
         self.model = PPOVisionTorque(obs_shape, action_dim).to(self.device)
 
         if load and checkpoint_path:
@@ -75,10 +75,10 @@ class PPOAgentVisionTorque:
         state = state.to(self.device)
         with torch.no_grad():
             mean, std, value = self.model(state)
-        dist      = Normal(mean, std)
-        action    = dist.sample()
-        log_prob  = dist.log_prob(action).sum(dim=-1)
-        entropy   = dist.entropy().sum(dim=-1)
+        dist     = Normal(mean, std)
+        action   = dist.sample()
+        log_prob = dist.log_prob(action).sum(dim=-1)
+        entropy  = dist.entropy().sum(dim=-1)
         return action, log_prob, entropy, value
 
     def compute_gae(self, rewards, values, dones, next_value):
@@ -90,7 +90,7 @@ class PPOAgentVisionTorque:
         """
         T, N = rewards.shape
         advantages = torch.zeros_like(rewards, device=self.device)
-        gae = torch.zeros(N, device=self.device)
+        gae       = torch.zeros(N, device=self.device)
 
         for t in reversed(range(T)):
             mask  = 1.0 - dones[t].float()
@@ -114,8 +114,8 @@ class PPOAgentVisionTorque:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # flatten for batching
-        T, N, *_ = batch.rewards.shape
-        C, H, W = batch.states.shape[2:]
+        T, N, *_  = batch.rewards.shape
+        C, H, W   = batch.states.shape[2:]
         action_dim = batch.actions.shape[-1]
 
         states_flat   = batch.states[:-1].reshape(-1, C, H, W).to(self.device)

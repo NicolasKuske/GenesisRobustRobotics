@@ -1,6 +1,3 @@
-# run_ppo_vision_torque.py
-
-
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 
@@ -11,7 +8,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from algo.ppo_agent_vision_torque import PPOAgentVisionTorque, RolloutBatch
-from env.reach_cube_vision_torque import ReachCubeVisionTorqueEnv
+# Use the ego-centric stacked-frame torque environment
+from env.reach_cube_ego_vision_stacked_torque import ReachCubeEgoVisionStackedTorqueEnv as ReachCubeVisionTorqueEnv
 
 # ===== Params =====
 HORIZON = 100
@@ -23,7 +21,11 @@ def train_ppo(args):
     """
     Run PPO training loop for vision+torque task.
     """
-    env = ReachCubeVisionTorqueEnv(vis=args.vis, device=args.device, num_envs=args.num_envs)
+    env = ReachCubeVisionTorqueEnv(
+        vis=args.vis,
+        device=torch.device(args.device),
+        num_envs=args.num_envs
+    )
     print(f"[INFO] Training environment: {env}")
 
     # Agent with PPO hyperparameters
@@ -99,7 +101,7 @@ def inference_ppo(args):
     # set episodes_per_position=1 for inference
     env = ReachCubeVisionTorqueEnv(
         vis=args.vis,
-        device=args.device,
+        device=torch.device(args.device),
         num_envs=args.num_envs,
         episodes_per_position=1
     )
@@ -145,7 +147,7 @@ def parse_args():
     p.add_argument('-l', '--load', action='store_true', help='Load checkpoint (default path)')
     p.add_argument('--load_path', type=str, default=None, help='Path to checkpoint (overrides default)')
     p.add_argument('-n', '--num_envs', type=int, default=1, help='Parallel environments')
-    p.add_argument('-t', '--task', type=str, default='ReachCubeVisionTorque', help='Task name')
+    p.add_argument('-t', '--task', type=str, default='ReachCubeEgoVisionStackedTorque', help='Task name')
     p.add_argument('-d', '--device', type=str, default='cuda', help='cpu or cuda')
     p.add_argument('-m', '--mode', choices=['train', 'inference'], default='train', help='Run mode')
     p.add_argument('--num_episodes', type=int, default=100, help='Episodes to run in inference')

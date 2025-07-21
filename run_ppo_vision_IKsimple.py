@@ -11,7 +11,7 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from algo.ppo_agent_vision_torque import PPOAgentVision
+from algo.ppo_agent_vision_IKsimple import PPOAgentVision
 from env import *
 
 # map task names to env classes
