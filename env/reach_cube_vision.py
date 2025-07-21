@@ -1,5 +1,4 @@
-#env/reach_cube_vision.py
-
+# env/reach_cube_vision.py
 
 import numpy as np
 import genesis as gs
@@ -39,12 +38,7 @@ class ReachCubeVisionEnv:
         self.episodes_per_position = episodes_per_position
         self.window_size = window_size
         self.last_rewards = deque(maxlen=window_size)
-        # default thresholds for stages 0..6
-        if reward_thresholds is None:
-            self.reward_thresholds = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 3.5]
-        else:
-            self.reward_thresholds = reward_thresholds
-        # X-axis curriculum bounds
+        self.reward_thresholds = reward_thresholds or [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 3.5]
         self.fixed_x = 0.6
         self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
         self.max_stages = len(self.x_bounds)
@@ -64,12 +58,17 @@ class ReachCubeVisionEnv:
         self.prev_dist = None
         self.episode_reward = 0.0
 
+        # —— per-episode accumulators for shaping & bonus ——
+        self.sum_delta = None
+        self.sum_success = None
+
         # observation/action dims
         self.obs_shape = (3, 120, 120)
         self.action_space = 6
 
-        # Setup scene
+        # Setup scene, entities, cameras…
         self.scene = gs.Scene(
+            show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0.0, 0.0, 0.5),
@@ -91,15 +90,15 @@ class ReachCubeVisionEnv:
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
 
-        # cameras
+        # cameras grid…
         self.cams = []
         env_space = 5.0
         M = int(math.sqrt(self.num_envs))
         assert M*M == self.num_envs, "num_envs must be a perfect square"
         for idx in range(self.num_envs):
             row, col = divmod(idx, M)
-            x_off = (col - (M-1)/2)*env_space
-            y_off = (row - (M-1)/2)*env_space
+            x_off = (col - (M-1)/2) * env_space
+            y_off = (row - (M-1)/2) * env_space
             cam = self.scene.add_camera(
                 res=(120, 120),
                 pos=(2.5 + x_off, 0.5 + y_off, 3.5),
@@ -118,8 +117,8 @@ class ReachCubeVisionEnv:
         self._init_robot()
 
     def _init_robot(self):
-        self.motors_dof = torch.arange(7).to(self.device)
-        self.fingers_dof = torch.arange(7, 9).to(self.device)
+        self.motors_dof = torch.arange(7, device=self.device)
+        self.fingers_dof = torch.arange(7, 9, device=self.device)
         q0 = torch.tensor(
             [-1.0, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02],
             dtype=torch.float32, device=self.device
@@ -138,47 +137,37 @@ class ReachCubeVisionEnv:
         self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
 
     def _collect_states(self):
-        states = []
-        for cam in self.cams:
+        batch = torch.empty(
+            (self.num_envs, *self.obs_shape),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        for i, cam in enumerate(self.cams):
             rgb = cam.render()[0]
-            img = torch.from_numpy(rgb.copy()).permute(2,0,1).float()/255.0
-            states.append(img)
-        return torch.stack(states, dim=0)
+            np_img = rgb.copy()
+            img = torch.from_numpy(np_img).permute(2,0,1).float().div(255.0)
+            batch[i].copy_(img, non_blocking=True)
+        return batch
 
     def _sample_cube_pos(self):
-        """Random cube position based on current curriculum stage."""
         idx = min(self.x_stage, self.max_stages)
         lower = self.x_bounds[idx] if idx < self.max_stages else self.x_bounds[-1]
         x = np.random.uniform(lower, self.fixed_x, (1,1))
-        y = np.random.uniform(-0.6, 0.6, size=(1,1))
-        z = np.random.uniform(0.1, 1.0, size=(1,1))
+        y = np.random.uniform(-0.6, 0.6, (1,1))
+        z = np.random.uniform(0.1, 1.0, (1,1))
         return np.concatenate([x, y, z], axis=1)
-
-    def _process_episode_end(self):
-        ep_r = self.episode_reward
-        self.last_rewards.append(ep_r)
-        if len(self.last_rewards) == self.window_size:
-            mean_r = sum(self.last_rewards)/self.window_size
-            thr = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds)-1)]
-            if mean_r > thr:
-                self._advance_stage()
-        self.episode_reward = 0.0
-
-    def _advance_stage(self):
-        self.x_stage += 1
-        if self.x_stage <= self.max_stages:
-            lb = self.x_bounds[min(self.x_stage, len(self.x_bounds)-1)]
-            print(f"Advanced to stage {self.x_stage}: X ∈ [{lb:.2f}, {self.fixed_x:.2f}]")
-            self.last_rewards.clear()
-        else:
-            self.completed = True
-            print("Curriculum complete!")
 
     def reset(self):
         if self.episode_count > 0:
             self._process_episode_end()
         self.episode_count += 1
-        if (self.episode_count-1) % self.episodes_per_position == 0:
+
+        # reset accumulators
+        self.sum_delta = torch.zeros(self.num_envs, device=self.device)
+        self.sum_success = torch.zeros(self.num_envs, device=self.device)
+
+        # sample or repeat cube pos
+        if (self.episode_count - 1) % self.episodes_per_position == 0:
             one_pos = self._sample_cube_pos()
         else:
             one_pos = self.current_cube_pos[:1]
@@ -187,7 +176,6 @@ class ReachCubeVisionEnv:
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
-        # init distance for shaping
         obj = self.cube.get_pos()
         gp_l = self.franka.get_link("left_finger").get_pos()
         gp_r = self.franka.get_link("right_finger").get_pos()
@@ -203,6 +191,7 @@ class ReachCubeVisionEnv:
         pos[masks[0], 0] += 0.05; pos[masks[1], 0] -= 0.05
         pos[masks[2], 1] += 0.05; pos[masks[3], 1] -= 0.05
         pos[masks[4], 2] += 0.05; pos[masks[5], 2] -= 0.05
+
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector, pos=pos, quat=self.quat
         )
@@ -216,7 +205,6 @@ class ReachCubeVisionEnv:
         gp_r = self.franka.get_link("right_finger").get_pos()
         dist_new = torch.norm(obj_pos - (gp_l + gp_r)/2, dim=1)
 
-        # shaping reward
         if self.shaping_type == 'exp':
             delta = self.shaping_coef * (
                 torch.exp(-self.k * (dist_new - self.dist_offset))
@@ -224,17 +212,49 @@ class ReachCubeVisionEnv:
             )
         else:
             delta = self.shaping_coef * (self.prev_dist - dist_new)
+
         success = (dist_new < self.success_thresh).float()
         bonus = success * self.success_bonus
         rewards = delta + bonus
 
-        # update trackers
+        # accumulate
+        self.sum_delta += delta
+        self.sum_success += bonus
+
         self.prev_dist = dist_new
         self.episode_reward += rewards.mean().item()
-
-        dones = success.bool()
         self.pos = pos
-        return states, rewards, dones
+
+        return states, rewards, success.bool()
+
+    def _process_episode_end(self):
+        ep_r = self.episode_reward
+        shaping = self.sum_delta.mean().item()
+        bonus   = self.sum_success.mean().item()
+
+        # one‐line episode summary
+        print(f"[Episode {self.episode_count}] Shaping: {shaping:.4f}, Bonus: {bonus:.4f}, Total: {ep_r:.4f}")
+
+        # curriculum check & print
+        self.last_rewards.append(ep_r)
+        if len(self.last_rewards) == self.window_size:
+            mean_r = sum(self.last_rewards) / self.window_size
+            thr = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds)-1)]
+            print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thr:.4f}")
+            if mean_r > thr:
+                self._advance_stage()
+
+        self.episode_reward = 0.0
+
+    def _advance_stage(self):
+        self.x_stage += 1
+        if self.x_stage <= self.max_stages:
+            lb = self.x_bounds[min(self.x_stage, len(self.x_bounds)-1)]
+            print(f"Advanced to stage {self.x_stage}: X ∈ [{lb:.2f}, {self.fixed_x:.2f}]")
+            self.last_rewards.clear()
+        else:
+            self.completed = True
+            print("Curriculum complete!")
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
@@ -242,7 +262,8 @@ if __name__ == "__main__":
     for ep in range(10):
         obs = env.reset()
         for t in range(50):
-            actions = torch.randint(0,6,(env.num_envs,), device=env.device)
-            _, r, done = env.step(actions)
-            if done.any(): break
-        print(f"Episode {ep} total reward: {env.episode_reward:.4f}")
+            actions = torch.randint(0, 6, (env.num_envs,), device=env.device)
+            _, _, done = env.step(actions)
+            if done.any():
+                break
+
