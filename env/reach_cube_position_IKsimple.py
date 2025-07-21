@@ -1,4 +1,4 @@
-# env/reach_cube_position_IK.py
+# env/reach_cube_position_IKsimple.py
 
 import numpy as np
 import genesis as gs

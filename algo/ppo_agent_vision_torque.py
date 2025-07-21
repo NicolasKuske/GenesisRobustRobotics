@@ -1,24 +1,26 @@
+# algo/ppo_agent_vision_torque.py
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import Categorical
-from typing import NamedTuple
+from torch.distributions import Normal
+from typing import NamedTuple, Optional
 
-from network.ppo_vision_IK import PPOvision  # your updated conv-based PPO class
+from network.ppo_vision_torque import PPOVisionTorque  # your new conv‐Gaussian PPO network
 
 class RolloutBatch(NamedTuple):
     states:    torch.Tensor   # [T+1, N, C, H, W]
-    actions:   torch.Tensor   # [T,   N]
+    actions:   torch.Tensor   # [T,   N, action_dim]
     log_probs: torch.Tensor   # [T,   N]
     values:    torch.Tensor   # [T+1, N]
     rewards:   torch.Tensor   # [T,   N]
     dones:     torch.Tensor   # [T,   N]
 
-class PPOAgentVision:
+class PPOAgentVisionTorque:
     def __init__(
         self,
-        obs_shape,            # tuple, e.g. (3, 120, 120)
-        output_dim,           # number of discrete actions
+        obs_shape: tuple,       # (C, H, W)
+        action_dim: int,        # number of torque-controlled joints
         lr: float,
         gamma: float,
         lam: float,
@@ -30,7 +32,7 @@ class PPOAgentVision:
         device: str,
         load: bool = False,
         num_envs: int = 1,
-        checkpoint_path: str = None,
+        checkpoint_path: Optional[str] = None,
     ):
         self.device        = torch.device(device)
         self.num_envs      = num_envs
@@ -43,8 +45,8 @@ class PPOAgentVision:
         self.entropy_coef  = entropy_coef
         self.checkpoint_path = checkpoint_path
 
-        # actor–critic conv network
-        self.model = PPOvision(obs_shape, output_dim).to(self.device)
+        # actor–critic conv‐Gaussian network
+        self.model = PPOVisionTorque(obs_shape, action_dim).to(self.device)
 
         if load and checkpoint_path:
             self.load_checkpoint()
@@ -54,30 +56,29 @@ class PPOAgentVision:
     def save_checkpoint(self):
         torch.save({'model_state_dict': self.model.state_dict()},
                    self.checkpoint_path)
-        print(f"[PPOAgentVision] Saved checkpoint to {self.checkpoint_path}")
+        print(f"[PPOAgentVisionTorque] Saved checkpoint to {self.checkpoint_path}")
 
     def load_checkpoint(self):
         ckpt = torch.load(self.checkpoint_path, map_location=self.device)
         self.model.load_state_dict(ckpt['model_state_dict'])
-        print(f"[PPOAgentVision] Loaded checkpoint from {self.checkpoint_path}")
+        print(f"[PPOAgentVisionTorque] Loaded checkpoint from {self.checkpoint_path}")
 
     def select_action(self, state: torch.Tensor):
         """
         state: [N, C, H, W]
         returns:
-          action:    [N]
+          action:    [N, action_dim]
           log_prob:  [N]
           entropy:   [N]
           value:     [N]
         """
         state = state.to(self.device)
         with torch.no_grad():
-            logits, value = self.model(state)
-        probs    = torch.softmax(logits, dim=-1)
-        dist     = Categorical(probs)
-        action   = dist.sample()
-        log_prob = dist.log_prob(action)
-        entropy  = dist.entropy()
+            mean, std, value = self.model(state)
+        dist      = Normal(mean, std)
+        action    = dist.sample()
+        log_prob  = dist.log_prob(action).sum(dim=-1)
+        entropy   = dist.entropy().sum(dim=-1)
         return action, log_prob, entropy, value
 
     def compute_gae(self, rewards, values, dones, next_value):
@@ -112,40 +113,44 @@ class PPOAgentVision:
         # normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # flatten [T, N] → [T*N]
-        T, N = batch.rewards.shape
-        states_flat    = batch.states[:-1].reshape(-1, *batch.states.shape[2:]).to(self.device)
-        actions_flat   = batch.actions.reshape(-1).to(self.device)
-        old_logp_flat  = batch.log_probs.reshape(-1).to(self.device)
-        returns_flat   = returns.reshape(-1).to(self.device)
-        advs_flat      = advantages.reshape(-1).to(self.device)
+        # flatten for batching
+        T, N, *_ = batch.rewards.shape
+        C, H, W = batch.states.shape[2:]
+        action_dim = batch.actions.shape[-1]
+
+        states_flat   = batch.states[:-1].reshape(-1, C, H, W).to(self.device)
+        actions_flat  = batch.actions.reshape(-1, action_dim).to(self.device)
+        old_logp_flat = batch.log_probs.reshape(-1).to(self.device)
+        returns_flat  = returns.reshape(-1).to(self.device)
+        advs_flat     = advantages.reshape(-1).to(self.device)
 
         # PPO update loop
         for _ in range(self.epochs):
             perm = torch.randperm(T * N, device=self.device)
             for start in range(0, T * N, self.batch_size):
-                idx      = perm[start:start + self.batch_size]
-                s_batch  = states_flat[idx]
-                a_batch  = actions_flat[idx]
-                ol_batch = old_logp_flat[idx]
-                adv_batch= advs_flat[idx]
-                ret_batch= returns_flat[idx]
+                idx       = perm[start:start + self.batch_size]
+                s_batch   = states_flat[idx]
+                a_batch   = actions_flat[idx]
+                olp_batch = old_logp_flat[idx]
+                adv_batch = advs_flat[idx]
+                ret_batch = returns_flat[idx]
 
-                logits, values = self.model(s_batch)
-                dist    = Categorical(torch.softmax(logits, dim=-1))
-                logp    = dist.log_prob(a_batch)
-                entropy = dist.entropy().mean()
+                mean, std, values = self.model(s_batch)
+                dist     = Normal(mean, std)
+                logp     = dist.log_prob(a_batch).sum(dim=-1)
+                entropy  = dist.entropy().sum(dim=-1).mean()
 
-                ratio = (logp - ol_batch).exp()
+                ratio = (logp - olp_batch).exp()
                 surr1 = ratio * adv_batch
                 surr2 = torch.clamp(ratio,
-                                   1.0 - self.clip_epsilon,
-                                   1.0 + self.clip_epsilon) * adv_batch
+                                    1.0 - self.clip_epsilon,
+                                    1.0 + self.clip_epsilon) * adv_batch
 
                 policy_loss = -torch.min(surr1, surr2).mean()
                 value_loss  = nn.functional.mse_loss(values, ret_batch)
 
-                loss = policy_loss + self.value_coef * value_loss \
+                loss = policy_loss \
+                       + self.value_coef * value_loss \
                        - self.entropy_coef * entropy
 
                 self.optimizer.zero_grad()

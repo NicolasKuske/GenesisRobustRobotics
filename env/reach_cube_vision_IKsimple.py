@@ -1,4 +1,4 @@
-# reach_cube_vision_IK.py
+# env/reach_cube_vision_IKsimple.py
 
 import numpy as np
 import genesis as gs

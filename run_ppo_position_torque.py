@@ -1,4 +1,4 @@
-# run_ppo_position-c.py (refactored)
+# run_ppo_position_torque.py
 
 
 import os
@@ -10,7 +10,7 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from algo.ppo_agent_torque import PPOAgentTorque, RolloutBatch
-from env.reach_cube_torque_control import ReachCubeTorqueEnv
+from env.reach_cube_torque import ReachCubeTorqueEnv
 
 # ===== Params =====
 HORIZON = 100

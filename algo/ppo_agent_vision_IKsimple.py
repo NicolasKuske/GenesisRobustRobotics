@@ -1,11 +1,11 @@
-# ppo_agent_vision_IK.py
+# algo/ppo_agent_vision_IKsimple.py
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from network.ppo_vision_IK import PPOvision  # your conv-based PPO class
+from network.ppo_vision_torque import PPOvision  # your conv-based PPO class
 
 class PPOAgentVision:
     def __init__(

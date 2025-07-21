@@ -78,12 +78,12 @@ You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}
 
 You can add `-d mps` to train:
 ```bash
-python run_ppo_vision_IK.py -n 10 -d mps
+python run_ppo_vision_torque.py -n 10 -d mps
 ```
 
 - Evaluation
 
 You can add `-d mps` to eval and visualization:
 ```bash
-python run_ppo_vision_IK.py -l -v -n 1 -t GraspFixedBlock -d mps
+python run_ppo_vision_torque.py -l -v -n 1 -t GraspFixedBlock -d mps
 ```

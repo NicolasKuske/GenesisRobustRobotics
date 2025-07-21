@@ -42,7 +42,7 @@ class PPOAgentTorque:
         self.entropy_coef = entropy_coef
 
         # Import PPO torque network
-        from network.ppo_torque_control import PPOContinuousTorque
+        from network.ppo_torque import PPOContinuousTorque
         self.model = PPOContinuousTorque(input_dim, action_dim, hidden_dim).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 

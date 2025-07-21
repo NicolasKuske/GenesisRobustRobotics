@@ -1,3 +1,5 @@
+# run_ppo_vision_torque.py
+
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 
@@ -7,33 +9,29 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from algo.ppo_agent_vision_IK import PPOAgentVision, RolloutBatch
-from env import *
+from algo.ppo_agent_vision_torque import PPOAgentVisionTorque, RolloutBatch
+from env.reach_cube_vision_torque import ReachCubeVisionTorqueEnv
 
 # map task names to env classes
 task_to_class = {
-    'ReachCubeVision':              ReachCubeVisionEnv,
-    'ReachCubeVisionStacked':       ReachCubeVisionStackedEnv,
-    'ReachCubeEgoVision':           ReachCubeEgoVisionEnv,
-    'ReachCubeEgoVisionStacked':    ReachCubeEgoVisionStackedEnv,
+    'ReachCubeVisionTorque': ReachCubeVisionTorqueEnv,
 }
 
 def create_environment(task_name):
     if task_name in task_to_class:
         return task_to_class[task_name]
-    raise ValueError(f"\n Task '{task_name}' is not recognized.\n")
-
+    raise ValueError(f"Task '{task_name}' is not recognized.")
 
 def train_ppo(args):
     # build environment
     env_cls = create_environment(args.task)
-    env = env_cls(vis=args.vis, device=args.device, num_envs=args.num_envs)
-    print(f"\n [INFO] Created environment: {env}\n")
+    env = env_cls(vis=args.vis, device=torch.device(args.device), num_envs=args.num_envs)
+    print(f"\n[INFO] Created environment: {env}\n")
 
     # build agent
-    agent = PPOAgentVision(
+    agent = PPOAgentVisionTorque(
         obs_shape       = env.obs_shape,
-        output_dim      = env.action_space,
+        action_dim      = env.action_space,
         lr              = args.lr,
         gamma           = args.gamma,
         lam             = args.lam,
@@ -56,44 +54,46 @@ def train_ppo(args):
     total_steps = args.total_timesteps
     num_updates = total_steps // (T * N)
 
-    # pre-allocate all rollout buffers on GPU
+    # pre-allocate all rollout buffers on device
     C, H, W = env.obs_shape
+    action_dim = env.action_space
+
     states_buf  = torch.empty((T+1, N, C, H, W), device=args.device)
-    actions_buf = torch.empty((T,   N),         dtype=torch.long, device=args.device)
-    logps_buf   = torch.empty((T,   N),         device=args.device)
-    values_buf  = torch.empty((T+1, N),         device=args.device)
-    rewards_buf = torch.empty((T,   N),         device=args.device)
-    dones_buf   = torch.empty((T,   N),         device=args.device)
+    actions_buf = torch.empty((T,   N, action_dim),      device=args.device)
+    logps_buf   = torch.empty((T,   N),                  device=args.device)
+    values_buf  = torch.empty((T+1, N),                  device=args.device)
+    rewards_buf = torch.empty((T,   N),                  device=args.device)
+    dones_buf   = torch.empty((T,   N),                  device=args.device)
 
     for update in range(1, num_updates + 1):
         # ---- collect rollout ----
-        state = env.reset()  
+        state = env.reset()
         states_buf[0].copy_(state)
 
         for t in range(T):
-            a, lp, ent, v = agent.select_action(state)
-            actions_buf[t].copy_(a)
-            logps_buf[t].copy_(lp)
-            values_buf[t].copy_(v)
+            action, logp, _, value = agent.select_action(state)
+            actions_buf[t].copy_(action)
+            logps_buf[t].copy_(logp)
+            values_buf[t].copy_(value)
 
-            next_state, r, d = env.step(a)
-            rewards_buf[t].copy_(r.to(args.device))
-            dones_buf[t].copy_(d.to(args.device).float())
+            next_state, reward, done = env.step(action)
+            rewards_buf[t].copy_(reward.to(args.device))
+            dones_buf[t].copy_(done.to(args.device).float())
 
-            if d.all():
+            if done.all():
                 next_state = env.reset()
             state = next_state
             states_buf[t+1].copy_(state)
 
         # bootstrap last‐step value
         with torch.no_grad():
-            _, last_val = agent.model(state)
+            _, _, last_val = agent.model(state)
         values_buf[T].copy_(last_val)
 
         # pack into RolloutBatch and train
         batch = RolloutBatch(
             states    = states_buf,   # [T+1, N, C, H, W]
-            actions   = actions_buf,  # [T,   N]
+            actions   = actions_buf,  # [T,   N, action_dim]
             log_probs = logps_buf,    # [T,   N]
             values    = values_buf,   # [T+1, N]
             rewards   = rewards_buf,  # [T,   N]
@@ -110,17 +110,16 @@ def train_ppo(args):
 
     writer.close()
 
-
 def inference_ppo(args):
     # build environment for inference
     env_cls = create_environment(args.task)
-    env = env_cls(vis=args.vis, device=args.device, num_envs=args.num_envs)
-    print(f"\n [INFO] Created environment: {env} \n")
+    env = env_cls(vis=args.vis, device=torch.device(args.device), num_envs=args.num_envs)
+    print(f"\n[INFO] Created environment: {env}\n")
 
     # build and load agent
-    agent = PPOAgentVision(
+    agent = PPOAgentVisionTorque(
         obs_shape       = env.obs_shape,
-        output_dim      = env.action_space,
+        action_dim      = env.action_space,
         lr              = args.lr,
         gamma           = args.gamma,
         lam             = args.lam,
@@ -139,8 +138,8 @@ def inference_ppo(args):
     num_episodes = args.num_episodes or 100
 
     for ep in range(1, num_episodes + 1):
-        state      = env.reset()
-        done_mask  = torch.zeros(args.num_envs, dtype=torch.bool, device=args.device)
+        state     = env.reset()
+        done_mask = torch.zeros(args.num_envs, dtype=torch.bool, device=args.device)
         step_count = 0
 
         for _ in range(args.horizon):
@@ -156,7 +155,6 @@ def inference_ppo(args):
 
     writer.close()
 
-
 def arg_parser():
     p = argparse.ArgumentParser()
     p.add_argument("-v", "--vis",   action="store_true", help="Enable visualization")
@@ -166,10 +164,10 @@ def arg_parser():
         help="`-l` alone loads default ckpt; `-l path.pth` loads that file"
     )
     p.add_argument("-n", "--num_envs",       type=int,   default=1,               help="Number of envs")
-    p.add_argument("-t", "--task",           type=str,   default="ReachCubeVision", help="Task")
+    p.add_argument("-t", "--task",           type=str,   default="ReachCubeVisionTorque", help="Task")
     p.add_argument("-d", "--device",         type=str,   default="cuda",          help="cpu, cuda[:X], or mps")
 
-    # new PPO hyperparameters
+    # PPO hyperparameters
     p.add_argument("--horizon",         type=int,   default=128,       help="Rollout horizon T")
     p.add_argument("--total_timesteps", type=int,   default=1_000_000, help="Total env steps")
     p.add_argument("--epochs",          type=int,   default=10,        help="PPO epochs per update")
@@ -182,13 +180,12 @@ def arg_parser():
     p.add_argument("--entropy_coef",    type=float, default=0.01,      help="Entropy bonus coefficient")
     p.add_argument("--save_interval",   type=int,   default=10,        help="Updates between checkpoints")
 
-    # add inference mode and episodes
+    # run mode
     p.add_argument('-m', '--mode', choices=['train', 'inference'], default='train',
-                   help="Run mode: 'train' (default) or 'inference'")
+                   help="Run mode: 'train' or 'inference'")
     p.add_argument('--num_episodes', type=int, default=None,
                    help="Number of episodes (inference only)")
     return p.parse_args()
-
 
 def main():
     args = arg_parser()
@@ -226,7 +223,5 @@ def main():
     else:
         inference_ppo(args)
 
-
 if __name__ == "__main__":
     main()
-

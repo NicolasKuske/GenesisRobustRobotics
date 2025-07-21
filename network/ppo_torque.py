@@ -1,4 +1,4 @@
-# network/ppo_torque_control.py
+# network/ppo_torque.py
 
 import torch
 import torch.nn as nn

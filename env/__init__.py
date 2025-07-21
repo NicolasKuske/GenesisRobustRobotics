@@ -6,7 +6,8 @@ from .reach_cube_position_IK import ReachCubePositionCurrEnv
 from .reach_cube_position_IKsimple import ReachCubePositionEnv
 
 #third person vision only
-from .reach_cube_vision_IK import ReachCubeVisionEnv
+from .reach_cube_vision_torque import ReachCubeVisionTorqueEnv
+#from .reach_cube_vision_IK import ReachCubeVisionEnv
 from .reach_cube_vision_stacked_IKsimple import ReachCubeVisionStackedEnv
 
 #end effector ego perspective vision only
@@ -22,4 +23,4 @@ from .reach_cube_ego_multimodal_stacked import ReachCubeEgoMultimodalStackedEnv
 
 
 #directJointcontrol
-from .reach_cube_torque_control import ReachCubeTorqueEnv
+from .reach_cube_torque import ReachCubeTorqueEnv
