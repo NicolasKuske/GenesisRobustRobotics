@@ -7,7 +7,7 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from algo.ppo_agent_vision import PPOAgentVision, RolloutBatch
+from algo.ppo_agent_vision_IK import PPOAgentVision, RolloutBatch
 from env import *
 
 # map task names to env classes

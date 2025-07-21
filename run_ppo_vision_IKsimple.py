@@ -1,4 +1,4 @@
-# run_ppo_vision.py
+# run_ppo_vision_IK.py
 
 
 import os
@@ -11,7 +11,7 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from algo.ppo_agent_vision import PPOAgentVision
+from algo.ppo_agent_vision_IK import PPOAgentVision
 from env import *
 
 # map task names to env classes
