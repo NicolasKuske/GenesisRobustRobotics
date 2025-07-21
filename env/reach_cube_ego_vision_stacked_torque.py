@@ -19,7 +19,7 @@ class ReachCubeEgoVisionStackedTorqueEnv:
         vis: bool,
         device: torch.device,
         num_envs: int = 1,
-        episodes_per_position: int = 100,
+        episodes_per_position: int = 3,
         window_size: int = 4,
         reward_thresholds=None,
     ):
@@ -55,7 +55,7 @@ class ReachCubeEgoVisionStackedTorqueEnv:
 
         # History settings & frame-skip
         self.history_length = 25
-        self.sample_offsets = [-25, -20, -15, -10, -1]
+        self.sample_offsets = [-1, -6, -11, -16, -21]
         self.image_history  = deque(maxlen=self.history_length)
         self.render_every   = 5
         self._step_count    = 0
@@ -214,7 +214,7 @@ class ReachCubeEgoVisionStackedTorqueEnv:
         """Plot all 20 frames and highlight sampled ones."""
         frames = list(self.image_history)
         sample_idxs = [(self.history_length + offset) for offset in self.sample_offsets]
-        # sample_offsets = [-20,-15,-10,-5,-1] → sample_idxs = [0,5,10,15,19]
+        # sample_offsets = [-21,-16,-11,-6,-1] → sample_idxs = [0,5,10,15,20] most recent frames
 
         fig, axes = plt.subplots(4, 5, figsize=(12, 10))
         axes = axes.flatten()

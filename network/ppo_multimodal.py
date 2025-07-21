@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from network.ppo_vision_torque import PPOvision
-from network.ppo_audio import PPOaudio
+from network.ppo_audio_IKsimple import PPOaudio
 
 class PPOmultimodal(nn.Module):
     def __init__(self, obs_shape_v, obs_shape_a, output_dim):

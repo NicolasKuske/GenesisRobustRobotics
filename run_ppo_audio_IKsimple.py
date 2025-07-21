@@ -1,4 +1,4 @@
-#run_ppo_audio.py
+#run_ppo_audio_IKsimple.py
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
@@ -9,7 +9,7 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from algo.ppo_agent_audio import PPOAgentAudio
+from algo.ppo_agent_audio_IKsimple import PPOAgentAudio
 from env import *
 
 task_to_class = {
