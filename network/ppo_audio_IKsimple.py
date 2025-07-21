@@ -1,4 +1,4 @@
-# network/ppo_audio.py
+# network/ppo_audio_IKsimple.py
 
 import torch
 import torch.nn as nn

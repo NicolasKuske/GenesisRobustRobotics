@@ -1,11 +1,11 @@
-# ppo_agent_audio.py
+# ppo_agent_audio_IKsimple.py
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from network.ppo_audio import PPOaudio  # your conv-based PPO class
+from network.ppo_audio_IKsimple import PPOaudio  # your conv-based PPO class
 
 
 class PPOAgentAudio:
