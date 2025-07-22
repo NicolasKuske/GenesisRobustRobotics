@@ -23,7 +23,7 @@ You get the Genesis dependencies via:
 ```
 pip install genesis-world
 ```
-That's it for now!
+Ready to roll!
 
 
 ## Command-line Arguments
