@@ -1,10 +1,10 @@
-#algo/ppo_agent_multimodal.py
+#algo/ppo_agent_multimodal_IKsimple.py
 
 
 import torch
 import torch.optim as optim
 from torch.distributions import Categorical
-from network.ppo_multimodal import PPOmultimodal
+from network.ppo_multimodal_IKsimple import PPOmultimodal
 
 class PPOAgentMultimodal:
     def __init__(self, obs_shape_vision, obs_shape_audio, output_dim, lr, gamma, clip_epsilon, device, load, num_envs, checkpoint_path):

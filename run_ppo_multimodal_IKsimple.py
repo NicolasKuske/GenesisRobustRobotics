@@ -6,7 +6,7 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from algo.ppo_agent_multimodal import PPOAgentMultimodal
+from algo.ppo_agent_multimodal_IKsimple import PPOAgentMultimodal
 from env import *
 
 def train_ppo(args):
