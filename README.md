@@ -55,9 +55,9 @@ Exchange 'position' with 'vision' for vision based RL, or use 'multimodal' for v
 
 To test the trained policy, you can load a pretrained model from the checkpoint (if one has been saved) and visualize the rollout, by executing the script with the following command-line arguments:
 ```bash
-python run_ppo_{agents}.py -v -l `logs/{task}_{agents}_checkpoint_released.pth` 
+python runners/{control_directory}/run_ppo_{modality}_{controller}.py -v -l `logs/{task}_{modality}_checkpoint_released.pth` 
 ```
-Similarly, you can specify `algo` as you like.
+Similarly, you can specify `modality` as you like.
 
 
 ## Saving and Loading Checkpoints
@@ -80,12 +80,12 @@ You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}
 
 You can add `-d mps` to train:
 ```bash
-python run_ppo_vision_torque.py -n 10 -d mps
+python runners/torque/run_ppo_vision_torque.py -n 10 -d mps
 ```
 
 - Evaluation
 
 You can add `-d mps` to eval and visualization:
 ```bash
-python run_ppo_vision_torque.py -l -v -n 1 -t GraspFixedBlock -d mps
+python runners/torque/run_ppo_vision_torque.py -l -v -n 1 -t ReachCubeEgoVisionStacked -d mps
 ```
