@@ -6,7 +6,7 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
 
 
 ## 🔥 News
-- [2025-07-22] Dired torque control or inverse kinematics for all classes
+- [2025-07-22] Choose between direct torque control and inverse kinematics for all classes
 - [2025-07-11] Added visual-audio multimodal class
 - [2025-06-30] Added task-model classes for audio-modality
 - [2025-06-17] Revolving task-model classes 
