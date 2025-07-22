@@ -46,7 +46,7 @@ You can run different learning algorithms with the following command structure. 
 ```bash
 python runners/ik/run_ppo_position_IKsimple.py -n 10
 ```
-Exchange 'position' with 'vision' for vision based RL. 
+Exchange 'position' with 'vision' for vision based RL, or use 'multimodal' for vision-audio based multimodal RL. 
 
 
 <img  src="figs/train.gif" width="300">
