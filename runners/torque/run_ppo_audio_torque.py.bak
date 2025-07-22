@@ -84,7 +84,7 @@ def main():
         args.load = True
         args.checkpoint_path = args.load_path
     else:
-        args.checkpoint_path = os.path.join('logs', default_ckpt)
+        args.checkpoint_path = os.path.join('../../logs', default_ckpt)
         os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
     backend = gs.cpu if args.device.startswith('cpu') else gs.gpu
     gs.init(backend=backend)

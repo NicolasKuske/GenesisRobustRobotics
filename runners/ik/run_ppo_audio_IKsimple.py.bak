@@ -1,9 +1,7 @@
-# run_ppo_vision_IKsimple.py
-
+#run_ppo_audio_IKsimple.py
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
-
 
 import sys
 import argparse
@@ -11,16 +9,12 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from agents.ik.ppo_agent_vision_IKsimple import PPOAgentVision
+from agents.ik.ppo_agent_audio_IKsimple import PPOAgentAudio
 from envs import *
 
-# map task names to envs classes
 task_to_class = {
-    'ReachCubeVision': ReachCubeVisionEnv,
-    'ReachCubeVisionStacked': ReachCubeVisionStackedEnv,
-
-    'ReachCubeEgoVision': ReachCubeEgoVisionEnv,
-    'ReachCubeEgoVisionStacked': ReachCubeEgoVisionStackedEnv,
+    'ReachCubeEgoAudio': ReachCubeEgoAudioEnv,
+    'ReachCubeEgoAudioStacked': ReachCubeEgoAudioStackedEnv,
 }
 
 def create_environment(task_name):
@@ -34,9 +28,8 @@ def train_ppo(args):
     env = env_cls(vis=args.vis, device=args.device, num_envs=args.num_envs)
     print(f"\n [INFO] Created environment: {env}\n")
 
-    # build agent
-    agent = PPOAgentVision(
-        obs_shape=env.obs_shape,  # use obs_shape instead of input_dim
+    agent = PPOAgentAudio(
+        obs_shape=env.obs_shape,
         output_dim=env.action_space,
         lr=1e-3,
         gamma=0.99,
@@ -104,35 +97,32 @@ def arg_parser():
         help="`-l` alone loads default checkpoint; `-l path.pth` loads that file"
     )
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
-    p.add_argument("-t", "--task", type=str, default="ReachCubeVision", help="Task")
+    p.add_argument("-t", "--task", type=str, default="ReachCubeEgoAudio", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
     return p.parse_args()
 
 def main():
     args = arg_parser()
 
-    # default checkpoint name under logs/
-    default_ckpt = f"{args.task}_ppo_checkpoint.pth"
+    default_ckpt = f"logs/{args.task}_ppo_checkpoint.pth"
 
     if args.load_path:
         args.load = True
-        args.checkpoint_path = (
-            os.path.join("logs", default_ckpt)
-            if args.load_path == "default"
-            else os.path.join("logs", args.load_path)
-        )
+        args.checkpoint_path = default_ckpt if args.load_path == "default" else args.load_path
+    else:
+        args.load = False
+        args.checkpoint_path = default_ckpt
+
+    os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
+
+    if args.load:
         print(f"\n[INFO] Loading checkpoint from: {args.checkpoint_path}\n")
         if not os.path.isfile(args.checkpoint_path):
             print(f"\n[ERROR] Checkpoint not found: {args.checkpoint_path}\n")
             sys.exit(1)
     else:
-        args.load = False
-        args.checkpoint_path = os.path.join("logs", default_ckpt)
         print("\n[INFO] No checkpoint provided; training from scratch.\n")
-        # only create logs/ when starting fresh
-        os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
 
-    # initialize Genesis
     backend = gs.cpu if args.device.lower().startswith("cpu") else gs.gpu
     gs.init(backend=backend)
 

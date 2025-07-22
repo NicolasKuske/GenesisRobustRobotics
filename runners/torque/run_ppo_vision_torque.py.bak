@@ -171,7 +171,7 @@ def main():
         args.load = True
         args.checkpoint_path = args.load_path
     else:
-        args.checkpoint_path = os.path.join("logs", default_ckpt)
+        args.checkpoint_path = os.path.join("../../logs", default_ckpt)
 
     if args.load:
         print(f"[INFO] Loading checkpoint from {args.checkpoint_path}")

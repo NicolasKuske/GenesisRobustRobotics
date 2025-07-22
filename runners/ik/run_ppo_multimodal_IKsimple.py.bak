@@ -74,7 +74,7 @@ def main():
     args = parser.parse_args()
 
     args.checkpoint_path = f"logs/{args.task}_ppo_checkpoint.pth"
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs("../../logs", exist_ok=True)
 
     backend = gs.cpu if args.device.startswith("cpu") else gs.gpu
     gs.init(backend=backend)

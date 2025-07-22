@@ -201,9 +201,9 @@ def main():
     if args.load_path:
         args.load = True
         args.checkpoint_path = (
-            os.path.join("logs", default_ckpt)
+            os.path.join("../../logs", default_ckpt)
             if args.load_path == "default"
-            else os.path.join("logs", args.load_path)
+            else os.path.join("../../logs", args.load_path)
         )
         print(f"\n[INFO] Loading checkpoint from: {args.checkpoint_path}\n")
         if not os.path.isfile(args.checkpoint_path):
@@ -211,7 +211,7 @@ def main():
             sys.exit(1)
     else:
         args.load = False
-        args.checkpoint_path = os.path.join("logs", default_ckpt)
+        args.checkpoint_path = os.path.join("../../logs", default_ckpt)
         os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
         if args.mode == 'train':
             print("\n[INFO] No checkpoint; training from scratch.\n")
