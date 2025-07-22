@@ -55,7 +55,8 @@ class ReachCubeEgoVisionStackedTorqueEnv:
 
         # History settings & frame-skip
         self.history_length = 25
-        self.sample_offsets = [-1, -6, -11, -16, -21]
+        #self.sample_offsets = [-1, -6, -11, -16, -21]
+        self.sample_offsets = [-21, -16, -11, -6, -1]
         self.image_history  = deque(maxlen=self.history_length)
         self.render_every   = 5
         self._step_count    = 0

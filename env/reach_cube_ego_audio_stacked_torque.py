@@ -24,9 +24,9 @@ class ReachCubeEgoAudioStackedTorqueEnv:
         reward_thresholds=None,
         window_size: int = 4,
         success_thresh: float = 0.30,
-        success_bonus: float = 0.1,
+        success_bonus: float = 1,
         shaping_coef: float = 10.0,
-        k: float = 0.5,
+        k: float = 2,
         dist_offset: float = 0.0,
         show_every: int = 10,
     ):
@@ -37,7 +37,7 @@ class ReachCubeEgoAudioStackedTorqueEnv:
         # Curriculum parameters
         self.episodes_per_position = episodes_per_position
         self.window_size = window_size
-        self.reward_thresholds = reward_thresholds or [3, 3, 3, 3, 3.5, 3.5, 3.5]
+        self.reward_thresholds = reward_thresholds or [10, 10, 10, 10, 12, 12, 12]
         self.last_rewards = deque(maxlen=self.window_size)
         self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
         self.fixed_x = 0.6
@@ -59,7 +59,7 @@ class ReachCubeEgoAudioStackedTorqueEnv:
 
         # History settings & sampling offsets
         self.history_length = history_length
-        self.sample_offsets = [-1, -6, -11, -16, -21]
+        self.sample_offsets = [-21, -16, -11, -6, -1]
         self.audio_history = deque(maxlen=self.history_length)
         self.raw_audio_history = deque(maxlen=self.history_length)
 
@@ -82,6 +82,7 @@ class ReachCubeEgoAudioStackedTorqueEnv:
 
     def _build_scene(self, show_viewer: bool):
         self.scene = gs.Scene(
+        show_FPS=False,
             show_viewer=show_viewer,
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
@@ -268,40 +269,37 @@ class ReachCubeEgoAudioStackedTorqueEnv:
         new_slice = self._collect_spectrograms()
         self.audio_history.append(new_slice)
 
-        # 3) Build the full stacked observation (5 frames × 10 ms each)
+        # 3) Build the full stacked observation
         obs = self._build_observation()
 
         # 4) For single-env, every `show_every` steps: play & plot the FULL stack
         if self.num_envs == 1 and (self.step_count % self.show_every == 0):
-            # Play concatenated audio history
             buf = np.concatenate([self.raw_audio_history[o] for o in self.sample_offsets])
             sd.play(buf, 22050)
             sd.wait()
-            # Plot the 50 ms stack (uses vmin=-40, vmax=100 inside _plot_stacked)
             self._plot_stacked(obs[0, 0])
 
-        # 5) Reward computation
+        # 5) Reward computation: pure exponential decay + success bonus
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube = self.cube.get_pos()
         dist_new = torch.norm((left + right) / 2 - cube, dim=1)
 
-        delta = self.shaping_coef * (
-            torch.exp(-self.k * (dist_new - self.dist_offset))
-            - torch.exp(-self.k * (self.prev_dist - self.dist_offset))
-        )
+        # shaped reward: e^{-k * distance}
+        shaped = 0.1*torch.exp(-self.k * dist_new)
+        # bonus for reaching the target threshold
         success = (dist_new < self.success_thresh).float()
         bonus = success * self.success_bonus
-        rewards = delta + bonus
+        rewards = shaped + bonus
 
-        # Update trackers
-        self.sum_delta += delta
+        # Update episode trackers
         self.sum_success += bonus
         self.prev_dist = dist_new
         self.episode_reward += rewards.mean().item()
 
         dones = success.bool()
         return obs, rewards, dones
+
 
 
 
