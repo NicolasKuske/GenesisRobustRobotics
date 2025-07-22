@@ -53,7 +53,7 @@ Exchange 'pos' with 'vis' for vision based RL.
 
 To test the trained policy, you can load a pretrained model from the checkpoint (if one has been saved) and visualize the rollout, by executing the script with the following command-line arguments:
 ```bash
-python run_ppo_{algo}.py -v -l `logs/{task}_{algo}_checkpoint_released.pth` 
+python run_ppo_{agents}.py -v -l `logs/{task}_{agents}_checkpoint_released.pth` 
 ```
 Similarly, you can specify `algo` as you like.
 

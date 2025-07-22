@@ -1,8 +1,7 @@
 import argparse
 import genesis as gs
 import torch
-from algo.ppo_agent_vision_torque import PPOAgent
-from env import *
+from agents.torque.ppo_agent_vision_torque import PPOAgent
 import os
 
 task_to_class = {
@@ -115,7 +114,7 @@ def arg_parser():
     parser.add_argument(
         "-hd", "--hidden_dim",
         type=int, default=64,
-        help="Hidden dimension for the network"
+        help="Hidden dimension for the networks"
     )
     parser.add_argument(
         "-t", "--task",
