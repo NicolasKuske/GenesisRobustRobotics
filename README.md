@@ -85,7 +85,7 @@ python runners/torque/run_ppo_vision_torque.py -n 10 -d mps
 
 - Evaluation
 
-You can add `-d mps` to eval and visualization:
+You can add `-d mps` to eval and visualization (-d cpu to run from cpu) :
 ```bash
-python runners/torque/run_ppo_vision_torque.py -l -v -n 1 -t ReachCubeEgoVisionStacked -d mps
+python runners/torque/run_ppo_vision_torque.py -d cpu -l -v -n 1 -t ReachCubeEgoVisionStackedTorque -d mps
 ```
