@@ -2,12 +2,12 @@
 
 This repository contains RL environments using the Genesis general-purpose physics platform to test multimodal continual learning.
 
-You can choose between xyz-position based, vision-based and audio-based, and multimodal visual-audio based agents.
+You can choose between xyz-position based, vision-based and audio-based, and multimodal vision-audio based agents.
 
 
 ## 🔥 News
 - [2025-07-22] Choose between direct torque control and inverse kinematics for all classes
-- [2025-07-11] Added visual-audio multimodal class
+- [2025-07-11] Added vision-audio multimodal class
 - [2025-06-30] Added task-model classes for audio-modality
 - [2025-06-17] Revolving task-model classes 
 - [2025-06-14] Focus on the bare necessities
