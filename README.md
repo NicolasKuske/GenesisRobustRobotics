@@ -2,10 +2,12 @@
 
 This repository contains RL environments using the Genesis general-purpose physics platform to test multimodal continual learning.
 
-You can choose between xyz-position based, vision-based and audio-based RL. --- currently multimodality is not implemented
+You can choose between xyz-position based, vision-based and audio-based, and multimodal visual-audio based agents.
 
 
 ## 🔥 News
+- [2025-07-22] Dired torque control or inverse kinematics for all classes
+- [2025-07-11] Added visual-audio multimodal class
 - [2025-06-30] Added task-model classes for audio-modality
 - [2025-06-17] Revolving task-model classes 
 - [2025-06-14] Focus on the bare necessities
@@ -40,11 +42,11 @@ That's it for now!
 
 - Training
 
-You can run different learning algorithms with the following command structure. Here is an example of running training with 10 envs using xyz-position based RL 
+You can run different learning algorithms with the following command structure. Here is an example of running training with 10 envs using xyz-position based RL and inverse kinematic (ik) control
 ```bash
-python run_ppo_position_IKsimple.py -n 10
+python runners/ik/run_ppo_position_IKsimple.py -n 10
 ```
-Exchange 'pos' with 'vis' for vision based RL. 
+Exchange 'position' with 'vision' for vision based RL. 
 
 
 <img  src="figs/train.gif" width="300">
