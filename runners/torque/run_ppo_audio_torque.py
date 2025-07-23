@@ -1,5 +1,7 @@
 
-# run_ppo_audio_stacked_torque.py
+# runners/torque/run_ppo_audio_stacked_torque.py
+
+
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 import genesis as gs

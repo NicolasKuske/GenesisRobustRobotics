@@ -8,62 +8,100 @@ from collections import deque
 from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 import sounddevice as sd
 
-
 class ReachCubeEgoMultimodalStackedEnv:
-    def __init__(self, vis, device, num_envs=1, randomize_every=100, listen_idx=0, show_every=10):
+    """
+    Multimodal environment with stacked vision and audio inputs.
+    Uses frame-skipping for efficiency and aligned history of length 25.
+    """
+    def __init__(
+        self,
+        vis: bool,
+        device: torch.device,
+        num_envs: int = 1,
+        randomize_every: int = 100,
+        listen_idx: int = 0,
+        show_every: int = 10,
+        render_every: int = 5
+    ):
+
+        # Discrete action count
+        self.action_space = 6
+
+
+        # Device and env parameters
         self.device = device
         self.num_envs = num_envs
         self.randomize_every = randomize_every
         self.listen_idx = listen_idx
         self.show_every = show_every
+        self.render_every = render_every
         self.episode_count = 0
         self.step_count = 0
+        self._step_count = 0  # for frame-skip
 
-        # History length and sample offsets for stacking
-        self.history_length = 20
-        self.sample_offsets = [-20, -15, -10, -5, -1]
-        self.action_space = 6
 
-        # Vision dims
+
+        # History and sampling offsets
+        self.history_length = 25
+        self.sample_offsets = [-21, -16, -11, -6, -1]
+
+        # Vision history and shape
         self.image_history = deque(maxlen=self.history_length)
         self.obs_shape_vision = (3 * len(self.sample_offsets), 120, 120)
 
-        # Audio dims
+        # Audio history and shape
         self.audio_history = deque(maxlen=self.history_length)
         self.raw_audio_history = deque(maxlen=self.history_length)
         self.freq_bins = 257
-        self.obs_shape_audio = (1, self.freq_bins, len(self.sample_offsets))
+        # for 10ms simulation windows, STFT produces 1 time bin per slice (n_fft=512, hop_length=256)
+        self.time_bins_per_slice = 1
+        self.obs_shape_audio = (
+            1,
+            self.freq_bins,
+            self.time_bins_per_slice * len(self.sample_offsets)
+        )
+
+        # Set up plotting
         self._fig = plt.figure("Stacked Spectrogram Preview")
 
-        # Genesis Scene
+        # Build the Genesis scene
         self.scene = gs.Scene(
             viewer_options=gs.options.ViewerOptions(
-                camera_pos=(3, 2, 1.5), camera_lookat=(0, 0, 0.2), camera_fov=30,
-                res=(960, 640), max_FPS=60),
+                camera_pos=(3, 2, 1.5),
+                camera_lookat=(0, 0, 0.2),
+                camera_fov=30,
+                res=(960, 640),
+                max_FPS=60
+            ),
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
-            show_viewer=vis)
-
+            show_viewer=vis
+        )
+        # Add entities
         self.scene.add_entity(gs.morphs.Plane())
         self.franka = self.scene.add_entity(
-            gs.morphs.MJCF(file="assets/xml/franka_emika_panda/panda.xml"))
+            gs.morphs.MJCF(file="assets/xml/franka_emika_panda/panda.xml")
+        )
         self.cube = self.scene.add_entity(
-            gs.morphs.Box(size=(0.06,0.06,0.06)),
-            surface=gs.surfaces.Rough(color=(0.99,0.82,0.09)),
+            gs.morphs.Box(size=(0.06, 0.06, 0.06)),
+            surface=gs.surfaces.Rough(color=(0.99, 0.82, 0.09)),
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
 
-        # Setup cameras
+        # Cameras attached to end-effector
         self.cams = []
-        cam_transform = trans_quat_to_T(np.array([0.03, 0, 0.03]), xyz_to_quat(np.array([185,0,90])))
-        for _ in range(num_envs):
-            cam = self.scene.add_camera(res=(120,120), fov=90, GUI=True)
+        cam_transform = trans_quat_to_T(
+            np.array([0.03, 0, 0.03]),
+            xyz_to_quat(np.array([185, 0, 90]))
+        )
+        for _ in range(self.num_envs):
+            cam = self.scene.add_camera(res=(120, 120), fov=90, GUI=True)
             self.cams.append(cam)
         self.cam_transform = cam_transform
 
-        self.scene.build(n_envs=num_envs, env_spacing=(5,5))
-        self.envs_idx = np.arange(num_envs)
-
+        # Build parallel envs
+        self.scene.build(n_envs=self.num_envs, env_spacing=(5, 5))
+        self.envs_idx = np.arange(self.num_envs)
         for cam in self.cams:
             cam.start_recording()
 
@@ -71,17 +109,24 @@ class ReachCubeEgoMultimodalStackedEnv:
         self._init_robot()
 
     def _init_robot(self):
+        # Neutral joint positions
         q0 = torch.tensor(
             [[-1.0, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02]],
             device=self.device
         ).repeat(self.num_envs, 1)
-
         self.franka.set_qpos(q0, envs_idx=self.envs_idx)
         self.scene.step()
-        self.fixed_finger_pos = q0[:,7:9].clone()
+        self.fixed_finger_pos = q0[:, 7:9].clone()
         self.end_effector = self.franka.get_link("hand")
-        self.pos = torch.tensor([0.2720,-0.1683,1.0164],device=self.device).repeat(self.num_envs,1)
-        self.quat = torch.tensor([0.1992,0.7857,-0.3897,0.4371],device=self.device).repeat(self.num_envs,1)
+        # Default EE pose
+        self.pos = torch.tensor(
+            [0.2720, -0.1683, 1.0164],
+            device=self.device
+        ).repeat(self.num_envs, 1)
+        self.quat = torch.tensor(
+            [0.1992, 0.7857, -0.3897, 0.4371],
+            device=self.device
+        ).repeat(self.num_envs, 1)
 
     def _render(self):
         imgs = []
@@ -92,16 +137,15 @@ class ReachCubeEgoMultimodalStackedEnv:
             cam_T = ee_T @ self.cam_transform
             cam.set_pose(cam_T)
             rgb = cam.render()[0]
-            img = torch.from_numpy(rgb.copy()).permute(2,0,1).float()/255.0
+            img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0
             imgs.append(img)
-        return torch.stack(imgs,dim=0)
+        return torch.stack(imgs, dim=0)
 
     def simulate_audio(self, dist):
+        # 10ms audio burst
         sr, dur = 22050, 0.01
         t = np.linspace(0, dur, int(sr * dur), endpoint=False)
-        # constant 1 kHz tone, distance-attenuated
-        tone = chirp(t, f0=1000, f1=1000, t1=dur) / (dist ** 2 + 1e-6)
-        # sum of five random chirps, scaled down
+        tone = chirp(t, f0=1000, f1=1000, t1=dur) / (dist**2 + 1e-6)
         noise = sum(
             np.random.rand() * chirp(
                 t,
@@ -114,12 +158,16 @@ class ReachCubeEgoMultimodalStackedEnv:
         return tone + noise
 
     def _compute_spectrogram(self, audio):
-        # Always use n_fft=512 as per original audio-only script
         S = librosa.stft(audio, n_fft=512, hop_length=256)
-        return librosa.amplitude_to_db(np.abs(S), ref=1.0)[:self.freq_bins, :9]
+        # first 257 freq bins, first 9 time bins
+        return librosa.amplitude_to_db(np.abs(S), ref=1.0)[:self.freq_bins, :self.time_bins_per_slice]
 
     def _collect_spectrograms(self, play_audio=False):
-        dists = torch.norm(self.franka.get_link("hand").get_pos()-self.cube.get_pos(),dim=1).cpu().numpy()
+        # Compute distance from EE to cube
+        dists = torch.norm(
+            self.franka.get_link("hand").get_pos() - self.cube.get_pos(),
+            dim=1
+        ).cpu().numpy()
         specs = []
         for i, dist in enumerate(dists):
             audio = self.simulate_audio(dist)
@@ -144,49 +192,47 @@ class ReachCubeEgoMultimodalStackedEnv:
         self._fig.canvas.flush_events()
 
     def _build_observation(self):
+        # Stack by offsets
         vis_obs = torch.cat([self.image_history[i] for i in self.sample_offsets], dim=1)
-        aud_obs = torch.cat([self.audio_history[i] for i in self.sample_offsets], dim=2).unsqueeze(1)
-        return vis_obs, aud_obs
+        aud_slices = torch.cat([self.audio_history[i] for i in self.sample_offsets], dim=2)
+        return vis_obs, aud_slices.unsqueeze(1)
 
     def reset(self):
         self.episode_count += 1
-        cube_pos = (np.array([[0.1,0.5,0.3]])
-                    if self.episode_count == 1
-                    else np.random.uniform(-1,1,(1,3))*[1,1,0.5]+[0,0,0.5])
-        self.current_cube_pos = np.repeat(cube_pos, self.num_envs, axis=0)
+        # Randomize cube
+        if self.episode_count == 1:
+            base = np.array([[0.1, 0.5, 0.3]])
+        elif self.episode_count % self.randomize_every == 0:
+            xy = np.random.uniform(-1, 1, (1, 2)) * [1, 1]
+            z = np.random.uniform(0.1, 0.5, (1, 1))
+            base = np.concatenate([xy, z], axis=1)
+        else:
+            base = self.current_cube_pos[:1]
+        self.current_cube_pos = np.repeat(base, self.num_envs, axis=0)
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # Clear and initialize histories
+        # Clear histories
         self.image_history.clear()
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
-        # First render and spectrogram collection
+        # First full render + spectrogram
         frame = self._render()
         spec = self._collect_spectrograms(play_audio=False)
         first_raw = self.raw_audio_history[-1].copy()
 
-        # Populate full histories
+        # Populate deque
         for _ in range(self.history_length):
             self.image_history.append(frame)
             self.audio_history.append(spec)
             self.raw_audio_history.append(first_raw)
 
-        vis_obs, aud_obs = self._build_observation()
-        # Show and play on single-envs reset
-        if self.num_envs == 1:
-            self._plot_stacked(aud_obs[0,0])
-            snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
-            full_buffer = np.concatenate(snippets, axis=0)
-            sd.play(full_buffer, 22050)
-            sd.wait()
-
-        return vis_obs, aud_obs
+        return self._build_observation()
 
     def step(self, actions):
-        # Movement deltas for 6 actions
+        # Move end-effector
         deltas = torch.tensor([
             [0.05, 0.0, 0.0],
             [-0.05, 0.0, 0.0],
@@ -199,35 +245,39 @@ class ReachCubeEgoMultimodalStackedEnv:
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector, pos=self.pos, quat=self.quat
         )
-        self.franka.control_dofs_position(qpos[:,:-2], torch.arange(7, device=self.device), self.envs_idx)
+        self.franka.control_dofs_position(qpos[:, :-2], torch.arange(7, device=self.device), self.envs_idx)
         self.scene.step()
 
-        # Render vision and collect audio
-        frame = self._render()
+        # Frame-skip logic
+        self._step_count += 1
+        if self._step_count % self.render_every == 0:
+            frame = self._render()
+            spec = self._collect_spectrograms(play_audio=False)
+        else:
+            frame = self.image_history[-1]
+            spec = self.audio_history[-1]
+
+        # Update histories
         self.image_history.append(frame)
-        spec = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(spec)
         self.step_count += 1
 
+        # Build obs
         vis_obs, aud_obs = self._build_observation()
-        # Periodic display and playback
         if self.num_envs == 1 and (self.step_count % self.show_every == 0):
-            self._plot_stacked(aud_obs[0,0])
-            snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
-            full_buffer = np.concatenate(snippets, axis=0)
-            sd.play(full_buffer, 22050)
+            self._plot_stacked(aud_obs[0, 0])
+            snippets = [self.raw_audio_history[i] for i in self.sample_offsets]
+            sd.play(np.concatenate(snippets, axis=0), 22050)
             sd.wait()
 
         # Compute reward and done
         dist = torch.norm(
-            self.franka.get_link("hand").get_pos() - self.cube.get_pos(),
-            dim=1
+            self.franka.get_link("hand").get_pos() - self.cube.get_pos(), dim=1
         )
-        rewards = torch.clamp(torch.exp(-4*(dist-0.1)), 0.0, 1.0)
+        rewards = torch.clamp(torch.exp(-4 * (dist - 0.1)), 0.0, 1.0)
         dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return (vis_obs, aud_obs), rewards, dones
-
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)

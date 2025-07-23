@@ -1,4 +1,4 @@
-#run_ppo_audio_IKsimple.py
+#runners/ik/run_ppo_audio_IKsimple.py
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
@@ -30,7 +30,7 @@ def train_ppo(args):
 
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
-        output_dim=env.action_space,
+        action_shape=env.action_space,
         lr=1e-3,
         gamma=0.99,
         clip_epsilon=0.2,

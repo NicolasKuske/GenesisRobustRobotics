@@ -1,3 +1,6 @@
+#envs/ik/reach_cube_ego_audio_stacked_IKsimple.py
+
+
 import numpy as np
 import genesis as gs
 import torch
@@ -26,7 +29,7 @@ class ReachCubeEgoAudioStackedEnv:
         listen_idx: int = 0,
         show_every: int = 10,
         randomize_every: int = 100,
-        history_length: int = 20,
+        history_length: int = 25,
         sample_offsets=None,
     ):
         # --- Configuration ---
@@ -38,14 +41,14 @@ class ReachCubeEgoAudioStackedEnv:
 
         # History for spectrograms and raw audio
         self.history_length = history_length
-        self.sample_offsets = sample_offsets or [-20, -15, -10, -5, -1]
+        self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
         self.audio_history = deque(maxlen=self.history_length)
         self.raw_audio_history = deque(maxlen=self.history_length)
 
         # Spectrogram dimensions: freq bins and stacked time frames
         self.freq_bins = 257
         self.time_bins = len(self.sample_offsets)
-        self.obs_shape = (1, self.freq_bins, self.time_bins)
+        self.obs_shape = (1, self.freq_bins, self.time_bins) #(1,257,5)
         self.action_space = 6
 
         # Matplotlib figure for live preview
@@ -63,7 +66,7 @@ class ReachCubeEgoAudioStackedEnv:
     def _build_scene(self, show_viewer: bool):
         """Set up the Genesis scene, ground plane, robot, and cube."""
         self.scene = gs.Scene(
-            #show_FPS=False,
+            show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0, 0, 0.2),
@@ -192,7 +195,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.episode_count += 1
         # Decide new cube position
         if self.episode_count == 1:
-            one_pos = np.array([[0.65, 0.0, 0.1]]).reshape(1, 3)   #default_position
+            one_pos = np.array([[0.6, 0.6, 0.7]]).reshape(1, 3)   #default_position
        	    #one_pos = np.array([[-0.5, 0.3, 0.7]]).reshape(1, 3)  #new_position1
             #one_pos = np.array([[0.1, 0.5, 0.3]]).reshape(1, 3)   #new_position2
         elif self.episode_count % self.randomize_every == 0:
@@ -294,4 +297,3 @@ class ReachCubeEgoAudioStackedEnv:
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
     env = ReachCubeEgoAudioStackedEnv(vis=True, device=torch.device('cuda'), listen_idx=0)
-

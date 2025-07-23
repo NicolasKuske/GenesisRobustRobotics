@@ -1,4 +1,4 @@
-# agents/ppo_agent_vision_IKsimple.py
+# agents/ik/ppo_agent_vision_IKsimple.py
 
 import torch
 import torch.nn as nn
@@ -11,7 +11,7 @@ class PPOAgentVision:
     def __init__(
         self,
         obs_shape,            # tuple, e.g. (3, 120, 120)
-        output_dim,           # number of discrete actions
+        action_shape,           # number of discrete actions
         lr,
         gamma,
         clip_epsilon,
@@ -25,7 +25,7 @@ class PPOAgentVision:
         self.checkpoint_path = checkpoint_path
 
         # instantiate our conv-based policy networks
-        self.model = PPOvision(obs_shape, output_dim).to(self.device)
+        self.model = PPOvision(obs_shape, action_shape).to(self.device)
 
         if load:
             self.load_checkpoint()
@@ -55,7 +55,7 @@ class PPOAgentVision:
         """
         state = state.to(self.device)
         with torch.no_grad():
-            logits = self.model(state)
+            _, logits = self.model(state)
         probs = nn.functional.softmax(logits, dim=-1)
         dist = Categorical(probs)
         action = dist.sample()
@@ -92,14 +92,14 @@ class PPOAgentVision:
             raise ValueError(f"Unexpected states_tensor shape: {states_tensor.shape}")
 
         with torch.no_grad():
-            logits_old = self.model(states_flat)
+            _,logits_old = self.model(states_flat)
             probs_old = nn.functional.softmax(logits_old, dim=-1)
 
         actions_flat = actions_tensor.view(-1)
         advantages_flat = advantages.view(-1)
 
         for _ in range(10):
-            logits_new = self.model(states_flat)
+            _,logits_new = self.model(states_flat)
             probs_new = nn.functional.softmax(logits_new, dim=-1)
 
             dist_old = Categorical(probs_old)

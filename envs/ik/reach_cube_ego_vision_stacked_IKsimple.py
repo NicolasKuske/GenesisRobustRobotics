@@ -1,5 +1,4 @@
-# reach_cube_ego_vision_stacked_IKsimple.py
-
+# envs/ik/reach_cube_ego_video_stacked_IKsimple.py
 
 import numpy as np
 import genesis as gs
@@ -10,7 +9,6 @@ from collections import deque
 from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 
 class ReachCubeEgoVisionStackedEnv:
-    # Build the scene & entities with stacked frames history, and display when n=1
     def __init__(self, vis, device, num_envs=1, randomize_every=100):
         self.device = device
         self.num_envs = num_envs
@@ -18,33 +16,21 @@ class ReachCubeEgoVisionStackedEnv:
         self.episode_count = 0
         self.step_count = 0
 
-        # history settings: sim dt=0.01 → 100 Hz → 10 steps = 100 ms
-        self.history_length = 20
-        # sample four frames over that window
-        self.sample_offsets = [-20, -15, -10, -5, -1]
-        
-        
-        #self.history_length = 10
-        # sample four frames over that window
-        #self.sample_offsets = [-9, -6, -3, -1]
-        
-        
-        # will hold torch tensors of shape (num_envs, 3, 120, 120)
+        # history settings
+        self.history_length = 25
+        self.sample_offsets = [-21, -16, -11, -6, -1]
         self.image_history = deque(maxlen=self.history_length)
+        self.render_every = 5
+        self._step_count = 0
 
-        # Initial fixed cube position
-        #self.initial_pos = np.array([0.65, 0.0, 0.1])[None, :] #position0
         self.initial_pos = np.array([0.1, 0.5, 0.3])[None, :]
-        #one_pos = np.array([[0.1, 0.5, 0.3]]).reshape(1, 3) #position2
         self.current_cube_pos = None
 
-        # Observation and action dimensions
         self.obs_shape = (3 * len(self.sample_offsets), 120, 120)
         self.action_space = 6
 
         # Genesis scene setup
         self.scene = gs.Scene(
-            #show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0.0, 0.0, 0.2),
@@ -55,12 +41,36 @@ class ReachCubeEgoVisionStackedEnv:
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
             show_viewer=vis,
+            vis_options=gs.options.VisOptions(plane_reflection=True),
+            renderer=gs.renderers.Rasterizer(),
         )
 
-        # Add plane, robot, and target cube
-        self.plane = self.scene.add_entity(gs.morphs.Plane())
+        # Add reflecting plane
+        self.scene.add_entity(
+            gs.morphs.Plane(),
+            surface=gs.surfaces.Aluminium(ior=10.0)
+        )
+
+        # Add walls
+        for pos, color, euler in [
+            ((4,  0, 1),  (0.9, 0.9, 0.9),  (0, -20,  0)),
+            ((-3, 0, 1),  (0.7, 0.7, 0.7),  (0,  20,  0)),
+            ((0, -3, 1),  (0.56,0.57,0.58), (0,  20, 90)),
+        ]:
+            self.scene.add_entity(
+                gs.morphs.Box(
+                    size=(0.1, 8, 4),
+                    pos=pos,
+                    euler=euler,
+                    collision=False
+                ),
+                surface=gs.surfaces.Rough(color=color),
+                material=gs.materials.Rigid(gravity_compensation=1.0)
+            )
+
+        # Robot and cube
         self.franka = self.scene.add_entity(
-            gs.morphs.MJCF(file="assets/xml/franka_emika_panda/panda.xml"),
+            gs.morphs.MJCF(file="assets/xml/franka_emika_panda/panda.xml")
         )
         self.cube = self.scene.add_entity(
             gs.morphs.Box(size=(0.06,0.06,0.06)),
@@ -68,7 +78,7 @@ class ReachCubeEgoVisionStackedEnv:
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
 
-        # Camera setup: use fixed transform relative to end-effector
+        # Camera setup
         self.cams = []
         self.cam_transform = trans_quat_to_T(
             np.array([0.03, 0, 0.03]),
@@ -83,12 +93,11 @@ class ReachCubeEgoVisionStackedEnv:
         self.scene.build(n_envs=self.num_envs, env_spacing=(env_space, env_space))
         self.envs_idx = np.arange(self.num_envs)
 
-        # Start camera recording
         for cam in self.cams:
             cam.start_recording()
 
-        # Initialize robot pose (cube pos will be set in reset)
         self._init_robot()
+
 
     def _init_robot(self):
         self.motors_dof = torch.arange(7, device=self.device)
@@ -108,7 +117,9 @@ class ReachCubeEgoVisionStackedEnv:
         base_quat = torch.tensor([0.1992, 0.7857, -0.3897, 0.4371], device=self.device)
         self.quat = base_quat.unsqueeze(0).repeat(self.num_envs, 1)
 
-        qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=self.pos, quat=self.quat)
+        qpos = self.franka.inverse_kinematics(
+            link=self.end_effector, pos=self.pos, quat=self.quat
+        )
         self.franka.control_dofs_position(qpos[:,:-2], self.motors_dof, self.envs_idx)
 
     def _render(self):
@@ -116,7 +127,6 @@ class ReachCubeEgoVisionStackedEnv:
         M = int(math.sqrt(self.num_envs))
         env_space = 100.0
         for idx, cam in enumerate(self.cams):
-            # update ego-camera pose
             ee_pos = self.end_effector.get_pos(envs_idx=[idx])[0].cpu().numpy()
             ee_quat = self.end_effector.get_quat(envs_idx=[idx])[0].cpu().numpy()
             col = idx // M; row = idx % M
@@ -159,33 +169,43 @@ class ReachCubeEgoVisionStackedEnv:
         for _ in range(self.history_length):
             self.image_history.append(first.clone())
 
+        # reset frame-skip counter
+        self._step_count = 0
+
         return self._build_observation()
 
     def step(self, actions):
         masks = [actions==i for i in range(6)]
         pos = self.pos.clone()
-        pos[masks[0],0]+=0.05; pos[masks[1],0]-=0.05
-        pos[masks[2],1]+=0.05; pos[masks[3],1]-=0.05
-        pos[masks[4],2]+=0.05; pos[masks[5],2]-=0.05
+        pos[masks[0],0] += 0.05; pos[masks[1],0] -= 0.05
+        pos[masks[2],1] += 0.05; pos[masks[3],1] -= 0.05
+        pos[masks[4],2] += 0.05; pos[masks[5],2] -= 0.05
 
-        qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=pos, quat=self.quat)
+        qpos = self.franka.inverse_kinematics(
+            link=self.end_effector, pos=pos, quat=self.quat
+        )
         self.franka.control_dofs_position(qpos[:,:-2], self.motors_dof, self.envs_idx)
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
-        new_frame = self._render()
+        # frame-skip: render only every Nth step
+        if self._step_count % self.render_every == 0:
+            new_frame = self._render()
+        else:
+            new_frame = self.image_history[-1]
+
+        self._step_count += 1
         self.image_history.append(new_frame)
 
         obs = self._build_observation()
 
-        # increment and possibly display
+        # optional display every 100 steps in single-env
         self.step_count += 1
         if self.num_envs == 1 and self.step_count % 100 == 0:
-            # obs shape = (1, 12, 120, 120)
             frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
             plt.figure(figsize=(8,8))
-            for i in range(4):
-                ax = plt.subplot(2,2,i+1)
+            for i in range(len(self.sample_offsets)):
+                ax = plt.subplot(2,3,i+1)
                 img = np.transpose(frames[i], (1,2,0))
                 ax.imshow(img)
                 ax.axis('off')
@@ -206,3 +226,10 @@ class ReachCubeEgoVisionStackedEnv:
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
     env = ReachCubeEgoVisionStackedEnv(vis=True, device=torch.device("cuda"))
+    obs = env.reset()
+    for _ in range(200):
+        actions = torch.randint(0, 6, (env.num_envs,), device=env.device)
+        obs, rewards, dones = env.step(actions)
+        if dones.any():
+            print("Done!", dones)
+            break

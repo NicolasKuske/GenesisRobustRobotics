@@ -1,4 +1,4 @@
-# run_ppo_vision_IKsimple.py
+# runners/ik/run_ppo_vision_IKsimple.py
 
 
 import os
@@ -37,7 +37,7 @@ def train_ppo(args):
     # build agent
     agent = PPOAgentVision(
         obs_shape=env.obs_shape,  # use obs_shape instead of input_dim
-        output_dim=env.action_space,
+        action_shape=env.action_space,
         lr=1e-3,
         gamma=0.99,
         clip_epsilon=0.2,
