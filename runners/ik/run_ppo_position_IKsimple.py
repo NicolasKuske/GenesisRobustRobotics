@@ -68,7 +68,7 @@ def inference_ppo(args):
         hidden_dim=64,
         input_dim=env.state_dim,
         output_dim=env.action_space,
-        lr = 1e-3,
+        lr = 1e-4,
         gamma = 0.99,
         clip_epsilon = 0.2
     )

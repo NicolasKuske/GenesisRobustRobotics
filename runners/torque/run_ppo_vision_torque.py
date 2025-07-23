@@ -48,7 +48,7 @@ def train_ppo(args):
     agent = PPOAgentVisionTorque(
         obs_shape       = env.obs_shape,
         action_dim      = env.action_space,
-        lr              = 3e-4,
+        lr              = 1e-4,
         gamma           = 0.99,
         lam             = 0.95,
         clip_epsilon    = 0.2,

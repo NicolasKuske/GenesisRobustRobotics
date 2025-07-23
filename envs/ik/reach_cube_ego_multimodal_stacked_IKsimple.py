@@ -1,6 +1,7 @@
 import numpy as np
 import genesis as gs
 import torch
+import math
 import librosa
 import matplotlib.pyplot as plt
 from scipy.signal import chirp
@@ -75,13 +76,35 @@ class ReachCubeEgoMultimodalStackedEnv:
             ),
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
-            show_viewer=vis
+            show_viewer=vis,
+            vis_options=gs.options.VisOptions(plane_reflection=True),
+            renderer=gs.renderers.Rasterizer(),
         )
+
         # Add entities
         self.scene.add_entity(gs.morphs.Plane())
         self.franka = self.scene.add_entity(
             gs.morphs.MJCF(file="assets/xml/franka_emika_panda/panda.xml")
         )
+
+        # Add walls
+        for pos, color, euler in [
+            ((4,  0, 1),  (0.9, 0.9, 0.9),  (0, -20,  0)),
+            ((-3, 0, 1),  (0.7, 0.7, 0.7),  (0,  20,  0)),
+            ((0, -3, 1),  (0.56,0.57,0.58), (0,  20, 90)),
+        ]:
+            self.scene.add_entity(
+                gs.morphs.Box(
+                    size=(0.1, 8, 4),
+                    pos=pos,
+                    euler=euler,
+                    collision=False
+                ),
+                surface=gs.surfaces.Rough(color=color),
+                material=gs.materials.Rigid(gravity_compensation=1.0)
+            )
+
+        # Add cube
         self.cube = self.scene.add_entity(
             gs.morphs.Box(size=(0.06, 0.06, 0.06)),
             surface=gs.surfaces.Rough(color=(0.99, 0.82, 0.09)),
@@ -99,9 +122,12 @@ class ReachCubeEgoMultimodalStackedEnv:
             self.cams.append(cam)
         self.cam_transform = cam_transform
 
-        # Build parallel envs
-        self.scene.build(n_envs=self.num_envs, env_spacing=(5, 5))
+        # Build parallel environments
+        env_space = 100.0
+        self.scene.build(n_envs=self.num_envs, env_spacing=(env_space, env_space))
         self.envs_idx = np.arange(self.num_envs)
+
+        # start the cameras
         for cam in self.cams:
             cam.start_recording()
 
@@ -130,12 +156,23 @@ class ReachCubeEgoMultimodalStackedEnv:
 
     def _render(self):
         imgs = []
+        M = int(math.sqrt(self.num_envs))
+        env_space = 100.0
         for idx, cam in enumerate(self.cams):
             ee_pos = self.end_effector.get_pos(envs_idx=[idx])[0].cpu().numpy()
             ee_quat = self.end_effector.get_quat(envs_idx=[idx])[0].cpu().numpy()
-            ee_T = trans_quat_to_T(ee_pos, ee_quat)
+
+            # Add offset for parallel env positioning
+            col = idx // M;
+            row = idx % M
+            x_off = (col - (M - 1) / 2) * env_space
+            y_off = (row - (M - 1) / 2) * env_space
+            ee_pos_offset = ee_pos + np.array([x_off, y_off, 0.0])
+
+            ee_T = trans_quat_to_T(ee_pos_offset, ee_quat)
             cam_T = ee_T @ self.cam_transform
-            cam.set_pose(cam_T)
+            cam.set_pose(transform=cam_T)
+
             rgb = cam.render()[0]
             img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0
             imgs.append(img)

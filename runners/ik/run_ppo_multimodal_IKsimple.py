@@ -34,10 +34,13 @@ def train_ppo(args):
         obs_shape_vision=env.obs_shape_vision,
         obs_shape_audio=env.obs_shape_audio,
         action_shape=env.action_space,
+        lr=1e-4,
+        gamma=0.99,
+        clip_epsilon=0.2,
         device=args.device,
-        load=args.load is not None,
-        checkpoint_path=args.checkpoint,
-        num_envs=args.num_envs
+        load=args.load,
+        num_envs=args.num_envs,
+        checkpoint_path=args.checkpoint
     )
 
     with SummaryWriter(log_dir=f"runs/{args.task}") as writer:

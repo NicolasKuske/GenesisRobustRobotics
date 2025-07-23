@@ -23,7 +23,7 @@ class ReachCubeEgoVisionStackedEnv:
         self.render_every = 5
         self._step_count = 0
 
-        self.initial_pos = np.array([0.1, 0.5, 0.3])[None, :]
+        self.initial_pos = np.array([0.6, 0.6, 0.7])[None, :]
         self.current_cube_pos = None
 
         self.obs_shape = (3 * len(self.sample_offsets), 120, 120)
