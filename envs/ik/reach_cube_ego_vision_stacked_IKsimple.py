@@ -200,18 +200,18 @@ class ReachCubeEgoVisionStackedEnv:
         obs = self._build_observation()
 
         # optional display every 100 steps in single-env
-        self.step_count += 1
-        if self.num_envs == 1 and self.step_count % 100 == 0:
-            frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
-            plt.figure(figsize=(8,8))
-            for i in range(len(self.sample_offsets)):
-                ax = plt.subplot(2,3,i+1)
-                img = np.transpose(frames[i], (1,2,0))
-                ax.imshow(img)
-                ax.axis('off')
-            plt.suptitle(f"Stacked frames at step {self.step_count}")
-            plt.pause(0.1)
-            plt.show(block=False)
+        #self.step_count += 1
+        #if self.num_envs == 1 and self.step_count % 100 == 0:
+        #    frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
+        #    plt.figure(figsize=(8,8))
+        #    for i in range(len(self.sample_offsets)):
+        #        ax = plt.subplot(2,3,i+1)
+        #        img = np.transpose(frames[i], (1,2,0))
+        #        ax.imshow(img)
+        #        ax.axis('off')
+        #    plt.suptitle(f"Stacked frames at step {self.step_count}")
+        #    plt.pause(0.1)
+        #    plt.show(block=False)
 
         obj_pos = self.cube.get_pos()
         gp_l = self.franka.get_link("left_finger").get_pos()

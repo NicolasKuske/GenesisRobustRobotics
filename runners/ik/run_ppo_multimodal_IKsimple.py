@@ -2,9 +2,14 @@
 
 
 import os
-import sys
 os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
+
+import sys
+from pathlib import Path
+
+# Adds the root directory (two levels up from this file) to sys.path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 from pathlib import Path
 import argparse
 

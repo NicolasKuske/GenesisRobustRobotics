@@ -4,6 +4,11 @@ import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 
 import sys
+from pathlib import Path
+
+# Adds the root directory (two levels up from this file) to sys.path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
 import argparse
 import genesis as gs
 import torch
