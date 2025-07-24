@@ -1,16 +1,10 @@
-# runners/ik/run_ppo_multimodal_IKsimple.py
-
-
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'
-
 
 import sys
 from pathlib import Path
 
-# Adds the root directory (two levels up from this file) to sys.path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
-from pathlib import Path
 import argparse
 
 import torch
@@ -34,7 +28,7 @@ def train_ppo(args):
         obs_shape_vision=env.obs_shape_vision,
         obs_shape_audio=env.obs_shape_audio,
         action_shape=env.action_space,
-        lr=1e-4,
+        lr=1e-5,
         gamma=0.99,
         clip_epsilon=0.2,
         device=args.device,
@@ -67,15 +61,15 @@ def train_ppo(args):
                 if done_array.all():
                     break
 
-            loss = agent.train(states_v, states_a, actions, rewards, dones)
+            agent.train(states_v, states_a, actions, rewards, dones)
 
             if episode % args.save_every == 0:
                 agent.save_checkpoint()
+                print(f"[Episode {episode}] Checkpoint saved to {args.checkpoint}")
 
             mean_reward = total_reward.mean().item()
             writer.add_scalar('Reward/Mean', mean_reward, episode)
-            writer.add_scalar('Loss', loss, episode)
-            print(f"[Episode {episode}] Mean Reward: {mean_reward:.4f}, Loss: {loss:.4f}")
+            print(f"[Episode {episode}] Mean Reward: {mean_reward:.4f}")
 
 
 def parse_args():
@@ -114,7 +108,6 @@ def main():
 
     args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
 
-    # init genesis backend (Genesis installs its own logger handler here)
     backend = gs.cpu if args.device.type == 'cpu' else gs.gpu
     gs.init(backend=backend)
 
