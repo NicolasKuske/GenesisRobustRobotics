@@ -34,7 +34,7 @@ def train_ppo(args):
         obs_shape_vision=env.obs_shape_vision,
         obs_shape_audio=env.obs_shape_audio,
         action_shape=env.action_space,
-        lr=1e-5,
+        lr=1e-4,
         gamma=0.99,
         clip_epsilon=0.2,
         device=args.device,
