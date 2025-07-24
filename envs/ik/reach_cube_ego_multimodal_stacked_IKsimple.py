@@ -238,7 +238,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         self.episode_count += 1
         # Randomize cube
         if self.episode_count == 1:
-            base = np.array([[0.1, 0.5, 0.3]])
+            base = np.array([[0.6, 0.6, 0.7]])
         elif self.episode_count % self.randomize_every == 0:
             xy = np.random.uniform(-1, 1, (1, 2)) * [1, 1]
             z = np.random.uniform(0.1, 0.5, (1, 1))
