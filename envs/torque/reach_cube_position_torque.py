@@ -93,7 +93,7 @@ class ReachCubeTorqueEnv:
             res=(960,640), max_FPS=60
         )
         self.scene = gs.Scene(
-            show_FPS=False,
+            #show_FPS=False,
             viewer_options=opts,
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),

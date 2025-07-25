@@ -106,17 +106,18 @@ class PPOAgentMultimodalTorque:
         advs = advantages.reshape(-1)
         rets = returns.reshape(-1)
 
+        # The loop below must be indented here, inside the train() method!
         for _ in range(self.epochs):
-            idxs = torch.randperm(T * N, device=self.device)
+            idxs = torch.randperm(T * N, device='cpu')  # Ensure CPU indices
             for start in range(0, T * N, self.batch_size):
                 mb_idx = idxs[start:start+self.batch_size]
 
-                mb_sv = states_v[mb_idx]
-                mb_sa = states_a[mb_idx]
-                mb_actions = actions[mb_idx]
-                mb_old_logp = old_logp[mb_idx]
-                mb_advs = advs[mb_idx]
-                mb_rets = rets[mb_idx]
+                mb_sv = states_v[mb_idx].to(self.device)
+                mb_sa = states_a[mb_idx].to(self.device)
+                mb_actions = actions[mb_idx].to(self.device)
+                mb_old_logp = old_logp[mb_idx].to(self.device)
+                mb_advs = advs[mb_idx].to(self.device)
+                mb_rets = rets[mb_idx].to(self.device)
 
                 mean, std, values = self.model(mb_sv, mb_sa)
                 dist = Normal(mean, std)
@@ -135,3 +136,4 @@ class PPOAgentMultimodalTorque:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
