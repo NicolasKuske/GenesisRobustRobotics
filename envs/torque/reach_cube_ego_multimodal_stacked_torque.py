@@ -72,6 +72,8 @@ class ReachCubeEgoMultimodalStackedTorqueEnv:
         self.shaping_coef = 10.0
         self.k = 0.5
         self.dist_offset = 0.0
+        self.sum_delta = None
+        self.sum_success = None
 
         # Build Genesis scene
         self.scene = gs.Scene(
@@ -159,9 +161,12 @@ class ReachCubeEgoMultimodalStackedTorqueEnv:
         self.raw_audio_history = deque([first_raw_audio] * self.history_length, maxlen=self.history_length)
 
         obj = self.cube.get_pos()
-        grip = 0.5*(self.franka.get_link("left_finger").get_pos() +
-                    self.franka.get_link("right_finger").get_pos())
-        self.prev_dist = torch.norm(obj-grip,dim=1)
+        grip = 0.5 * (self.franka.get_link("left_finger").get_pos() +
+                      self.franka.get_link("right_finger").get_pos())
+        self.prev_dist = torch.norm(obj - grip, dim=1)
+
+        self.sum_delta = torch.zeros(self.num_envs, device=self.device)
+        self.sum_success = torch.zeros(self.num_envs, device=self.device)
 
         return self._build_observation()
 
@@ -173,16 +178,26 @@ class ReachCubeEgoMultimodalStackedTorqueEnv:
         return np.hstack((x,y,z))
 
     def _process_episode_end(self):
-        mean_r = np.mean(self.last_rewards)
-        if mean_r > self.reward_thresholds[min(self.x_stage,len(self.reward_thresholds)-1)]:
-            self.x_stage = min(self.x_stage+1,self.max_stages)
-        self.last_rewards.clear()
+        shaping = self.sum_delta.mean().item()
+        bonus = self.sum_success.mean().item()
+        ep_reward = shaping + bonus
+        print(f"[Episode {self.episode_count}] Shaping: {shaping:.4f}, Bonus: {bonus:.4f}, Total: {ep_reward:.4f}")
+        self.last_rewards.append(ep_reward)
+
+        if len(self.last_rewards) == self.window_size:
+            mean_r = np.mean(self.last_rewards)
+            thr_idx = min(self.x_stage, len(self.reward_thresholds) - 1)
+            thresh = self.reward_thresholds[thr_idx]
+            print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thresh:.4f}")
+            if mean_r > thresh:
+                self._advance_stage()
 
     def step(self,actions):
         torque = actions.clamp(-1,1)*self.max_torque
         self.franka.control_dofs_force(torque.cpu().numpy(),dofs_idx_local=np.arange(7),envs_idx=self.envs_idx)
         self.franka.control_dofs_position(self.fixed_finger_pos,torch.arange(7,9),self.envs_idx)
         self.scene.step()
+
         frame = self._render() if self._step_count%self.render_every==0 else self.image_history[-1]
         spec = self._collect_spectrograms()
         self.image_history.append(frame)
@@ -200,14 +215,28 @@ class ReachCubeEgoMultimodalStackedTorqueEnv:
             sd.play(np.concatenate(snippets, axis=0), 22050)
             sd.wait()
 
-        # Compute reward based on distance between end-effector and cube
-        dist = torch.norm(self.end_effector.get_pos() - self.cube.get_pos(), dim=1)
-        rewards = torch.clamp(torch.exp(-4 * (dist - 0.1)), 0.0, 1.0)
+        # Align with provided ReachCubeTorqueEnv
+        obj = self.cube.get_pos()
+        grip = 0.5 * (self.franka.get_link("left_finger").get_pos() +
+                      self.franka.get_link("right_finger").get_pos())
+        dist_new = torch.norm(obj - grip, dim=1)
 
-        # Set done flag (no termination condition here, but placeholder provided)
-        dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        delta = self.shaping_coef * (
+                torch.exp(-self.k * (dist_new - self.dist_offset))
+                - torch.exp(-self.k * (self.prev_dist - self.dist_offset))
+        )
+        self.prev_dist = dist_new
 
-        return (vis_obs, aud_obs), rewards, dones
+        success = (dist_new < self.success_thresh).float()
+        bonus = success * self.success_bonus
+
+        self.sum_delta += delta
+        self.sum_success += bonus
+
+        reward = delta + bonus
+        done = success.bool()
+
+        return (vis_obs, aud_obs), reward, done
 
 
     def _render(self):
