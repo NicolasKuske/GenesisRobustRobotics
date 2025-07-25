@@ -1,153 +1,134 @@
-# runners/torque/run_ppo_vision_IKsimple.py
-
+# File: runners/torque/run_ppo_multimodal_torque.py
 
 import os
-os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
+os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
 import sys
 from pathlib import Path
-
-# Adds the root directory (two levels up from this file) to sys.path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import argparse
-import genesis as gs
 import torch
+import genesis as gs
 from torch.utils.tensorboard import SummaryWriter
+from agents.torque.ppo_agent_multimodal_torque import PPOAgentMultimodalTorque, RolloutBatch
+from envs.torque.reach_cube_ego_multimodal_stacked_torque import ReachCubeEgoMultimodalStackedTorqueEnv
 
-from agents.torque.ppo_agent_vision_torque import PPOAgentVisionTorque, RolloutBatch
-from envs.torque.reach_cube_vision_torque import ReachCubeVisionTorqueEnv
-from envs.torque.reach_cube_ego_vision_stacked_torque import ReachCubeEgoVisionStackedTorqueEnv
-
-# Map task names to environment classes
-task_to_env = {
-    'ReachCubeVisionTorque': ReachCubeVisionTorqueEnv,
-    'ReachCubeEgoVisionStackedTorque': ReachCubeEgoVisionStackedTorqueEnv,
-}
-
-# Universal PPO parameters
+# PPO parameters
 HORIZON = 100
 TOTAL_TIMESTEPS = 100_000_000
 SAVE_INTERVAL = 5
 
 
-def create_environment(task_name):
-    if task_name in task_to_env:
-        return task_to_env[task_name]
-    raise ValueError(f"Task '{task_name}' is not recognized.")
-
-
 def train_ppo(args):
-    # Build environment
-    env_cls = create_environment(args.task)
-    device = torch.device(args.device)
-    env = env_cls(vis=args.vis, device=device, num_envs=args.num_envs)
-    print(f"[INFO] Training environment: {env}")
+    env = ReachCubeEgoMultimodalStackedTorqueEnv(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs
+    )
+    print("[INFO] Training multimodal torque environment initialized.")
 
-    # Build agent
-    agent = PPOAgentVisionTorque(
-        obs_shape       = env.obs_shape,
-        action_dim      = env.action_space,
-        lr              = 1e-4,
-        gamma           = 0.99,
-        lam             = 0.95,
-        clip_epsilon    = 0.2,
-        epochs          = 10,
-        batch_size      = 64,
-        value_coef      = 0.5,
-        entropy_coef    = 0.01,
-        device          = device,
-        checkpoint_path = args.checkpoint_path,
-        load            = args.load,
-        num_envs        = args.num_envs,
+    agent = PPOAgentMultimodalTorque(
+        obs_shape_vision=env.obs_shape_vision,
+        obs_shape_audio=env.obs_shape_audio,
+        action_dim=env.action_space,
+        lr=3e-4,
+        gamma=0.99,
+        lam=0.95,
+        clip_epsilon=0.2,
+        epochs=10,
+        batch_size=64,
+        device=args.device,
+        checkpoint_path=args.checkpoint_path,
+        load=args.load
     )
 
     writer = SummaryWriter(log_dir=f"runs/{args.task}_train")
-
     num_updates = TOTAL_TIMESTEPS // (HORIZON * args.num_envs)
 
     for update in range(1, num_updates + 1):
-        state = env.reset().to(device)
-        buffers = {k: [] for k in ['states', 'actions', 'logps', 'values', 'rewards', 'dones']}
+        state_v, state_a = env.reset()
+        buffers = {k: [] for k in ['states_v', 'states_a', 'actions', 'logps', 'values', 'rewards', 'dones']}
 
-        for t in range(HORIZON):
-            action, logp, _, value = agent.select_action(state)
-            buffers['states'].append(state)
+        for _ in range(HORIZON):
+            action, logp, _, value = agent.select_action(state_v, state_a)
+            buffers['states_v'].append(state_v)
+            buffers['states_a'].append(state_a)
             buffers['actions'].append(action)
-            buffers['logps'].append(logp.detach())
-            buffers['values'].append(value.detach())
+            buffers['logps'].append(logp)
+            buffers['values'].append(value)
 
-            state, reward, done = env.step(action)
-            state = state.to(device)
+            (state_v, state_a), reward, done = env.step(action)
 
-            buffers['rewards'].append(reward.to(device))
-            buffers['dones'].append(done.to(device).float())
+            buffers['rewards'].append(reward)
+            buffers['dones'].append(done.float())
 
             if done.all():
-                state = env.reset().to(device)
+                state_v, state_a = env.reset()
 
-        # Bootstrap value
         with torch.no_grad():
-            _, _, last_val = agent.model(state)
+            _, _, last_val = agent.model(state_v.to(agent.device), state_a.to(agent.device))
         buffers['values'].append(last_val)
-        # Record final state
-        buffers['states'].append(state)
+        buffers['states_v'].append(state_v)
+        buffers['states_a'].append(state_a)
 
-        # Pack into RolloutBatch and train
         batch = RolloutBatch(
-            states=torch.stack(buffers['states']),
+            states_v=torch.stack(buffers['states_v']),
+            states_a=torch.stack(buffers['states_a']),
             actions=torch.stack(buffers['actions']),
             log_probs=torch.stack(buffers['logps']),
             values=torch.stack(buffers['values']),
             rewards=torch.stack(buffers['rewards']),
             dones=torch.stack(buffers['dones']),
         )
-        agent.train(batch)
 
-        # Logging & checkpoint
+        agent.train(batch)
         mean_reward = batch.rewards.sum(dim=0).mean().item()
         writer.add_scalar('Reward/Mean', mean_reward, update)
+
         if update % SAVE_INTERVAL == 0:
             agent.save_checkpoint()
+
         print(f"[Update {update}/{num_updates}] Mean Reward: {mean_reward:.3f}")
 
     writer.close()
 
 
 def inference_ppo(args):
-    # Build environment for inference
-    env_cls = create_environment(args.task)
-    device = torch.device(args.device)
-    env = env_cls(vis=args.vis, device=device, num_envs=args.num_envs, episodes_per_position=1)
-    print(f"[INFO] Inference environment: {env}")
+    # Setup inference environment explicitly
+    env = ReachCubeEgoMultimodalStackedTorqueEnv(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs,
+        episodes_per_position=1
+    )
+    print(f"[INFO] Inference multimodal torque environment initialized.")
 
-    # Force full-range sampling
+    # Force full-range cube placement for inference
     env.x_stage = env.max_stages
     lower = env.x_bounds[-1]
     upper = env.fixed_x
-    print(f"[INFO] Inference X-range: [{lower:.2f}, {upper:.2f}]")
+    print(f"[INFO] Inference X-range forced: [{lower:.2f}, {upper:.2f}]")
 
-    # Load agent
-    agent = PPOAgentVisionTorque(
-        obs_shape       = env.obs_shape,
-        action_dim      = env.action_space,
-        device          = device,
-        checkpoint_path = args.checkpoint_path,
-        load            = True,
-        num_envs        = args.num_envs,
+    agent = PPOAgentMultimodalTorque(
+        obs_shape_vision=env.obs_shape_vision,
+        obs_shape_audio=env.obs_shape_audio,
+        action_dim=env.action_space,
+        device=args.device,
+        checkpoint_path=args.checkpoint_path,
+        load=True
     )
 
     writer = SummaryWriter(log_dir=f"runs/{args.task}_inference")
     for ep in range(1, args.num_episodes + 1):
-        state = env.reset().to(device)
-        done_mask = torch.zeros(args.num_envs, dtype=torch.bool, device=device)
+        state_v, state_a = env.reset()
+        done_mask = torch.zeros(args.num_envs, dtype=torch.bool, device=args.device)
         steps = 0
 
         while steps < HORIZON and not done_mask.all():
-            action, _, _, _ = agent.select_action(state)
-            state, _, done = env.step(action)
-            state = state.to(device)
-            done_mask |= done.to(device)
+            action, _, _, _ = agent.select_action(state_v, state_a)
+            (state_v, state_a), _, done = env.step(action)
+            done_mask |= done.to(args.device)
             steps += 1
 
         writer.add_scalar('Episode/Steps', steps, ep)
@@ -157,22 +138,23 @@ def inference_ppo(args):
 
 
 def parse_args():
-    p = argparse.ArgumentParser("PPO Vision+Torque Runner")
+    p = argparse.ArgumentParser("PPO Multimodal Torque Runner")
     p.add_argument('-v', '--vis', action='store_true', help='Enable visualization')
-    p.add_argument('-l', '--load', action='store_true', help='Load checkpoint (default path)')
-    p.add_argument('--load_path', type=str, default=None, help='Path to checkpoint (overrides default)')
+    p.add_argument('-l', '--load', action='store_true', help='Load checkpoint')
+    p.add_argument('--load_path', type=str, default=None, help='Checkpoint path')
     p.add_argument('-n', '--num_envs', type=int, default=1, help='Parallel environments')
-    p.add_argument('-t', '--task', type=str, default='ReachCubeVisionTorque', help='Task name')
-    p.add_argument('-d', '--device', type=str, default='cuda', help='cpu or cuda')
-    p.add_argument('-m', '--mode', choices=['train', 'inference'], default='train', help='Run mode')
-    p.add_argument('--num_episodes', type=int, default=100, help='Episodes to run in inference')
+    p.add_argument('-t', '--task', type=str, default='ReachCubeEgoMultimodalTorque', help='Task name')
+    p.add_argument('-d', '--device', type=str, default='cuda', help='Device: cpu or cuda')
+    p.add_argument('-m', '--mode', choices=['train', 'inference'], default='train', help='Mode: train or inference')
+    p.add_argument('--num_episodes', type=int, default=100, help='Number of inference episodes')
     return p.parse_args()
 
 
 def main():
     args = parse_args()
+    args.device = torch.device(args.device)
 
-    # Determine checkpoint path
+    # Set checkpoint path
     default_ckpt = f"{args.task}_ppo_checkpoint.pth"
     if args.load_path:
         args.load = True
@@ -187,14 +169,12 @@ def main():
     else:
         os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
         if args.mode == 'inference':
-            sys.exit("[ERROR] Inference mode requires a checkpoint. Use -l to specify one.")
+            sys.exit("[ERROR] Inference mode requires a checkpoint. Use -l or --load_path to specify one.")
         print("[INFO] No checkpoint; training from scratch.")
 
-    # Initialize Genesis backend
-    backend = gs.cpu if args.device.lower().startswith("cpu") else gs.gpu
+    backend = gs.cpu if args.device.type == 'cpu' else gs.gpu
     gs.init(backend=backend)
 
-    # Launch
     if args.mode == 'train':
         train_ppo(args)
     else:
