@@ -237,7 +237,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         plt.figure(self.fig_multimodal.number)
         plt.clf()
 
-        # Plot normalized spectrogram data but with custom colorbar labels
+        # Plot spectrogram (top, spans full width)
         ax_spec = plt.subplot(2, 1, 1)
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]
         im = ax_spec.imshow(
@@ -245,20 +245,14 @@ class ReachCubeEgoMultimodalStackedEnv:
             origin='lower',
             aspect='auto',
             extent=extent,
-            vmin=0.0,  # normalized min
-            vmax=1.0,  # normalized max
+            vmin=-20.0,
+            vmax=120.0,
             cmap='magma'
         )
         ax_spec.set_xlabel('Time (ms)')
         ax_spec.set_ylabel('Frequency (kHz)')
         ax_spec.set_title('Stacked Spectrogram')
-
-        # Set custom colorbar ticks and labels
-        cbar = plt.colorbar(im, ax=ax_spec, label='Amplitude (dB)')
-        cbar_ticks = np.linspace(0, 1, 8)  # normalized tick positions
-        cbar_labels = np.linspace(-20, 120, 8).astype(int)  # corresponding dB values
-        cbar.set_ticks(cbar_ticks)
-        cbar.set_ticklabels(cbar_labels)
+        plt.colorbar(im, ax=ax_spec, label='Amplitude (dB)')
 
         # Plot visual frames (bottom row, horizontally aligned)
         num_frames = len(self.sample_offsets)
@@ -372,8 +366,8 @@ class ReachCubeEgoMultimodalStackedEnv:
 
         # Build obs
         vis_obs, aud_obs = self._build_observation()
-        # NEW plotting call (every 20 steps)
-        if self.num_envs == 1 and (self.step_count % 20 == 0):
+        # NEW plotting call (every 50 steps)
+        if self.num_envs == 1 and (self.step_count % 50 == 0):
             self._plot_multimodal_obs(vis_obs, aud_obs)
 
         # Compute reward and done

@@ -16,12 +16,20 @@ from envs.ik.reach_cube_ego_multimodal_stacked_IKsimple import ReachCubeEgoMulti
 
 
 def train_ppo(args):
+    # Parse noise args
+    noise_config = {}
+    noise_args = args.noise
+    if noise_args:
+        noise_config = {noise_args[i]: float(noise_args[i+1]) for i in range(0, len(noise_args), 2)}
+
     env = ReachCubeEgoMultimodalStackedEnv(
         vis=args.vis,
         device=args.device,
         num_envs=args.num_envs,
-        randomize_every=args.randomize_every
+        randomize_every=args.randomize_every,
+        noise_config=noise_config  # NEW PARAMETER
     )
+
     print("Created multimodal environment:", env)
 
     agent = PPOAgentMultimodal(
@@ -82,9 +90,14 @@ def parse_args():
                    default='ReachCubeEgoMultimodalStacked', help='Task name')
     p.add_argument('-d', '--device', type=str, default='cuda', help='cpu or cuda')
     p.add_argument('--randomize_every', type=int, default=100, help='Cube randomization interval')
-    p.add_argument('--max_episodes', type=int, default=1_000_000, help='Max number of episodes')
+    p.add_argument('--max_episodes', type=int, default=1_000_000, help='Max episodes')
     p.add_argument('--max_steps', type=int, default=200, help='Max steps per episode')
     p.add_argument('--save_every', type=int, default=5, help='Episodes between saves')
+
+    # Add noise arguments
+    p.add_argument('--noise', nargs='+', default=[],
+                   help="Noise modalities and strength. Example: --noise visual 3 audio 5")
+
     return p.parse_args()
 
 
