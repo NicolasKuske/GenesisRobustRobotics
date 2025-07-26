@@ -73,6 +73,7 @@ class ReachCubeEgoMultimodalStackedEnv:
 
         # Build the Genesis scene
         self.scene = gs.Scene(
+            show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0, 0, 0.2),
@@ -211,7 +212,10 @@ class ReachCubeEgoMultimodalStackedEnv:
         # Explicit normalization: [-20 dB, 120 dB] → [0,1]
         S_db_normalized = (S_db + 20) / 140
         S_db_normalized = np.clip(S_db_normalized, 0.0, 1.0)
-
+        
+        ####no normalization
+        #S_db_normalized = S_db
+        
         return torch.from_numpy(S_db_normalized).float()
 
     def _collect_spectrograms(self):
@@ -310,6 +314,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         # Randomize cube
         if self.episode_count == 1:
             base = np.array([[-0.9, 0.6, 0.7]])
+            #base = np.array([[0.6, 0.6, 0.7]])
         elif self.episode_count % self.randomize_every == 0:
             xy = np.random.uniform(-1, 1, (1, 2)) * [1, 1]
             z = np.random.uniform(0.1, 0.5, (1, 1))

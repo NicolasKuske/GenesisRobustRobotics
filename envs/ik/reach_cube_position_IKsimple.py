@@ -18,7 +18,9 @@ class ReachCubePositionEnv:
 
         # episode counting & cube placement
         self.episode_count    = 0
-        self.initial_pos      = np.array([0.65, 0.0, 0.1])[None, :]
+        #self.initial_pos      = np.array([0.65, 0.0, 0.1])[None, :]
+        self.initial_pos      = np.array([-0.9, 0.6, 0.7])[None, :]
+        
         #self.initial_pos = np.array([-0.5, 0.3, 0.7])[None, :] #new_position1
         #self.initial_pos = np.array([0.1, 0.5, 0.3])[None, :]  #new_position2
         self.current_cube_pos = None
