@@ -7,7 +7,8 @@ from envs.ik.reach_cube_position_IKsimple import ReachCubePositionEnv
 
 #third person vision only
 from envs.torque.reach_cube_vision_torque import ReachCubeVisionTorqueEnv
-from envs.ik.reach_cube_vision_IK import ReachCubeVisionEnv
+from envs.ik.reach_cube_vision_IK import ReachCubeVisionCurrEnv
+from envs.ik.reach_cube_vision_IKsimple import ReachCubeVisionEnv
 from envs.ik.reach_cube_vision_stacked_IKsimple import ReachCubeVisionStackedEnv
 
 #end effector ego perspective vision only

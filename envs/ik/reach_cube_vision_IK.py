@@ -8,7 +8,7 @@ import math
 from collections import deque
 from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 
-class ReachCubeVisionEnv:
+class ReachCubeVisionCurrEnv:
     """
     Vision-based environment with curriculum on cube X-axis sampling.
 
@@ -258,7 +258,7 @@ class ReachCubeVisionEnv:
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
-    env = ReachCubeVisionEnv(vis=True, device=torch.device("cuda"))
+    env = ReachCubeVisionCurrEnv(vis=True, device=torch.device("cuda"))
     for ep in range(10):
         obs = env.reset()
         for t in range(50):

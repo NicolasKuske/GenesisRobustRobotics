@@ -20,7 +20,7 @@ from envs import *
 
 # map task names to envs classes
 task_to_class = {
-    'ReachCubeVision':              ReachCubeVisionEnv,
+    'ReachCubeVision':              ReachCubeVisionCurrEnv,
     'ReachCubeVisionStacked':       ReachCubeVisionStackedEnv,
     'ReachCubeEgoVision':           ReachCubeEgoVisionEnv,
     'ReachCubeEgoVisionStacked':    ReachCubeEgoVisionStackedEnv,
