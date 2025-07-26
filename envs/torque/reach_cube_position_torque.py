@@ -93,7 +93,7 @@ class ReachCubeTorqueEnv:
             res=(960,640), max_FPS=60
         )
         self.scene = gs.Scene(
-            #show_FPS=False,
+            show_FPS=False,
             viewer_options=opts,
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
@@ -159,7 +159,7 @@ class ReachCubeTorqueEnv:
         if (self.episode_count-1) % self.episodes_per_position == 0:
             self.current_cube_pos = self._sample_cube_pos()
 
-        self.build_env()
+        #self.build_env()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
         # initial observation
