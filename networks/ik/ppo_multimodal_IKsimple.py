@@ -11,7 +11,7 @@ class PPOmultimodal(nn.Module):
         obs_shape_a,
         action_shape,
         freeze_unimodal=False,
-        use_attention=False
+        use_attention=True
     ):
         super().__init__()
 

@@ -15,7 +15,8 @@ class ReachCubeVisionEnv:
         self.randomize_every = randomize_every
         self.episode_count = 0
         # initial fixed cube position
-        self.initial_pos = np.array([0.65, 0.0, 0.1])[None, :]
+        #self.initial_pos = np.array([0.65, 0.0, 0.1])[None, :]
+        self.initial_pos = np.array([-0.9, 0.6, 0.7])[None, :]
         self.current_cube_pos = None
 
         # observation and action dimensions
