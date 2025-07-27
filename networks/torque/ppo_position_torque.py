@@ -9,12 +9,16 @@ class PPOContinuousTorque(nn.Module):
     Outputs mean and standard deviation for continuous Gaussian policy,
     and a scalar state-value estimate.
     """
-    def __init__(self, input_dim: int, action_dim: int, hidden_dim: int = 128):
+    def __init__(self, input_dim: int, action_dim: int, hidden_dim: int = 256):
         super(PPOContinuousTorque, self).__init__()
 
         # Shared feature extractor
         self.feature_extractor = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),

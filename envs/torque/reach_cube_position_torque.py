@@ -28,7 +28,7 @@ class ReachCubeTorqueEnv:
         num_envs: int = 1,
         episodes_per_position: int = 3,
         window_size: int = 4,
-        reward_thresholds: list = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 3.5]
+        reward_thresholds: list = [2.0, 2.5, 2.5, 3, 3.0, 3.5, 3.5]
     ):
         # Basic settings
         self.device = device
@@ -89,7 +89,7 @@ class ReachCubeTorqueEnv:
         self.envs_idx = np.arange(self.num_envs)
 
         # Initial cube placement
-        self.build_env()
+        #self.build_env()
         self.current_cube_pos = self._sample_cube_pos()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
@@ -165,7 +165,7 @@ class ReachCubeTorqueEnv:
         if (self.episode_count-1) % self.episodes_per_position == 0:
             self.current_cube_pos = self._sample_cube_pos()
 
-        #self.build_env()
+        self.build_env()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
         # initial observation
@@ -250,21 +250,21 @@ class ReachCubeTorqueEnv:
         self.sum_success += bonus
 
         reward = delta + bonus
+        
+        joint_limit_penalty = -torch.sum(torch.relu(torch.abs(qpos) - safe_joint_limits), dim=1)
+	reward += joint_limit_penalty_weight * joint_limit_penalty
+
+	torque_penalty = -torch.norm(actions, dim=1)
+	reward += torque_penalty_weight * torque_penalty
+
+        
+        
         done = success.bool()
         qpos = self.franka.get_qpos()[:, :7]
 
         # Include previous action in observation
         obs = torch.cat((obj, grip, qpos, self.last_action), dim=1)
 
-        # Print current inputs and actions for debugging
-        print("\n--- Step Debug Info ---")
-        print(f"Cube Position      : {obj.cpu().numpy()}")
-        print(f"Gripper Position   : {grip.cpu().numpy()}")
-        print(f"Joint Positions    : {qpos.cpu().numpy()}")
-        print(f"Last Actions       : {self.last_action.cpu().numpy()}")
-        print(f"Observation Vector : {obs.cpu().numpy()}")
-        print(f"Current Actions    : {actions.cpu().numpy()}")
-        print("------------------------\n")
 
         # update last action
         self.last_action = actions.clone()
