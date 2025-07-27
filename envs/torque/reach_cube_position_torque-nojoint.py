@@ -26,8 +26,8 @@ class ReachCubeTorqueEnv:
         vis: bool,
         device: str,
         num_envs: int = 1,
-        episodes_per_position: int = 3,
-        window_size: int = 4,
+        episodes_per_position: int = 30,
+        window_size: int = 100,
         reward_thresholds: list = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 3.5]
     ):
         # Basic settings
@@ -44,7 +44,7 @@ class ReachCubeTorqueEnv:
         self.reward_thresholds = reward_thresholds
 
         # Observation/action dimensions
-        self.state_dim = 6 + 7  # (obj_xyz[3] + grip_xyz[3]) + 7 joint positions
+        self.state_dim = 6
         self.action_space = 7
 
         # Sampling bounds for Y, Z
@@ -167,8 +167,7 @@ class ReachCubeTorqueEnv:
         grip = 0.5*(self.franka.get_link("left_finger").get_pos() +
                     self.franka.get_link("right_finger").get_pos())
         self.prev_dist = torch.norm(obj - grip, dim=1)
-        qpos = self.franka.get_qpos()[:, :7]  # only the first 7 joints
-        return torch.cat((obj, grip, qpos), dim=1)
+        return torch.cat((obj, grip), dim=1)
 
     def _process_episode_end(self):
         shaping = self.sum_delta.mean().item()
@@ -238,9 +237,7 @@ class ReachCubeTorqueEnv:
 
         reward = delta + bonus
         done = success.bool()
-        qpos = self.franka.get_qpos()[:, :7]
-        return torch.cat((obj, grip, qpos), dim=1), reward, done
-
+        return torch.cat((obj, grip), dim=1), reward, done
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
