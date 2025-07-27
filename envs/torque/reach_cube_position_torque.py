@@ -44,8 +44,14 @@ class ReachCubeTorqueEnv:
         self.reward_thresholds = reward_thresholds
 
         # Observation/action dimensions
-        self.state_dim = 6 + 7  # (obj_xyz[3] + grip_xyz[3]) + 7 joint positions
+        # in __init__
+        self.state_dim = 6 + 7 + 7  # obj[3] + grip[3] + joints[7] + last action[7]
         self.action_space = 7
+
+        # Initialize last action as zeros
+        self.last_action = torch.zeros((self.num_envs, self.action_space), device=self.device)
+
+
 
         # Sampling bounds for Y, Z
         self.min_y, self.max_y = -0.6, 0.6
@@ -168,7 +174,14 @@ class ReachCubeTorqueEnv:
                     self.franka.get_link("right_finger").get_pos())
         self.prev_dist = torch.norm(obj - grip, dim=1)
         qpos = self.franka.get_qpos()[:, :7]  # only the first 7 joints
-        return torch.cat((obj, grip, qpos), dim=1)
+
+        # Reset last action to zeros at the start of each episode
+        self.last_action = torch.zeros((self.num_envs, self.action_space), device=self.device)
+
+        # Include last_action in the initial observation
+        obs = torch.cat((obj, grip, qpos, self.last_action), dim=1)
+
+        return obs
 
     def _process_episode_end(self):
         shaping = self.sum_delta.mean().item()
@@ -239,7 +252,24 @@ class ReachCubeTorqueEnv:
         reward = delta + bonus
         done = success.bool()
         qpos = self.franka.get_qpos()[:, :7]
-        return torch.cat((obj, grip, qpos), dim=1), reward, done
+
+        # Include previous action in observation
+        obs = torch.cat((obj, grip, qpos, self.last_action), dim=1)
+
+        # Print current inputs and actions for debugging
+        print("\n--- Step Debug Info ---")
+        print(f"Cube Position      : {obj.cpu().numpy()}")
+        print(f"Gripper Position   : {grip.cpu().numpy()}")
+        print(f"Joint Positions    : {qpos.cpu().numpy()}")
+        print(f"Last Actions       : {self.last_action.cpu().numpy()}")
+        print(f"Observation Vector : {obs.cpu().numpy()}")
+        print(f"Current Actions    : {actions.cpu().numpy()}")
+        print("------------------------\n")
+
+        # update last action
+        self.last_action = actions.clone()
+
+        return obs, reward, done
 
 
 if __name__ == "__main__":
