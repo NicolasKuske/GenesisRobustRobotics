@@ -26,8 +26,8 @@ class ReachCubeTorqueEnv:
         vis: bool,
         device: str,
         num_envs: int = 1,
-        episodes_per_position: int = 3,
-        window_size: int = 4,
+        episodes_per_position: int = 30,
+        window_size: int = 100,
         reward_thresholds: list = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 3.5]
     ):
         # Basic settings
