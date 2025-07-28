@@ -104,6 +104,9 @@ class ReachCubeEgoAudioStackedEnv:
         self.scene.build(n_envs=self.num_envs, env_spacing=(5.0, 5.0))
         self.envs_idx = np.arange(self.num_envs)
 
+
+
+
     def _init_robot(self):
         """Reset the Franka robot to a neutral pose in all environments."""
         self.motors_dof = torch.arange(7, device=self.device)
@@ -220,19 +223,6 @@ class ReachCubeEgoAudioStackedEnv:
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # Update mic markers on reset
-        left = self.franka.get_link("left_finger").get_pos()
-        right = self.franka.get_link("right_finger").get_pos()
-
-        mic_positions = ((left + right) / 2).cpu().numpy()
-        mic_positions[:, 2] += 0.05
-
-        for idx, mic_marker in enumerate(self.mic_markers):
-            mic_pos_tensor = torch.tensor(
-                [mic_positions[idx]], dtype=torch.float32, device=self.device
-            )
-            mic_marker.set_pos(mic_pos_tensor, envs_idx=[idx])
-
         # Reset histories
         self.audio_history.clear()
         self.raw_audio_history.clear()
@@ -256,24 +246,25 @@ class ReachCubeEgoAudioStackedEnv:
         return obs
 
     def step(self, actions: torch.Tensor):
-        # Define action step sizes
-        d_radial = 0.05  # radial step size
-        d_angle = np.deg2rad(5)  # rotation step size
+        d_radial = 0.05  # radial step distance
+        d_angle = np.deg2rad(5)  # angular step size in radians
         d_z = 0.05  # vertical step size
-        min_radius = 0.1  # minimum radius from center
+        min_radius = 0.1  # Minimum allowed distance from local center to avoid flipping
 
-        # Clone current positions to modify safely
         pos = self.pos.clone()
 
-        # Environment grid parameters for multiple environments
+        # Calculate dimensions of environment grid
         M = int(math.sqrt(self.num_envs))
         env_space = 5.0
 
-        # Loop through each environment to apply actions individually
+        mic_offset = 0.1  # radial outward offset for mic visualization
+        mic_positions = []
+
+        # Loop through each environment separately
         for idx in range(self.num_envs):
             action = actions[idx].item()
 
-            # Current end-effector position
+            # Current position of end-effector
             ee_pos = pos[idx].cpu().numpy()
 
             # Calculate local environment center offset
@@ -287,17 +278,19 @@ class ReachCubeEgoAudioStackedEnv:
             radial_xy = ee_pos[:2] - local_origin
             radial_norm = np.linalg.norm(radial_xy)
 
-            # Handle near-origin case safely
+            # Handle near-origin case
             if radial_norm < 1e-6:
                 radial_dir = np.array([1.0, 0.0])
             else:
                 radial_dir = radial_xy / radial_norm
 
-            # Apply new action logic
+            # Perform action based on the new radial logic
             if action == 0:  # Move forward along radial vector
                 ee_pos[:2] += radial_dir * d_radial
-            elif action == 1:  # Move backward along radial vector (avoiding origin crossing)
-                new_radial_norm = max(radial_norm - d_radial, min_radius)
+            elif action == 1:  # Move backward along radial vector (avoid crossing origin)
+                new_radial_norm = radial_norm - d_radial
+                if new_radial_norm < min_radius:
+                    new_radial_norm = min_radius
                 ee_pos[:2] = local_origin + radial_dir * new_radial_norm
             elif action == 2:  # Rotate left around local origin
                 angle = d_angle
@@ -314,10 +307,15 @@ class ReachCubeEgoAudioStackedEnv:
             elif action == 5:  # Move downward (Z-)
                 ee_pos[2] -= d_z
 
-            # Update position back to tensor
+            # Update new position
             pos[idx] = torch.from_numpy(ee_pos).to(self.device)
 
-        # Perform inverse kinematics to achieve desired positions
+            # --- Microphone position update (matching radial logic) ---
+            mic_xy = radial_xy + radial_dir * mic_offset + local_origin
+            mic_z = ee_pos[2]  # Microphone same height as end-effector
+            mic_positions.append(np.array([mic_xy[0], mic_xy[1], mic_z]))
+
+        # Perform inverse kinematics and update robot positions
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector, pos=pos, quat=self.quat
         )
@@ -325,23 +323,29 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
-        # === Mic position remains unchanged from original script ===
-        left = self.franka.get_link("left_finger").get_pos()
-        right = self.franka.get_link("right_finger").get_pos()
-        mic_positions = ((left + right) / 2).cpu().numpy()
-        mic_positions[:, 2] += 0.05  # slight vertical offset for visualization
+        # Update microphone visual markers if present
+        if hasattr(self, 'mic_markers'):
+            for idx, mic_marker in enumerate(self.mic_markers):
+                mic_pos_tensor = torch.tensor([mic_positions[idx]], dtype=torch.float32, device=self.device)
+                mic_marker.set_pos(mic_pos_tensor, envs_idx=[idx])
 
-        for idx, mic_marker in enumerate(self.mic_markers):
-            mic_pos_tensor = torch.tensor(
-                [mic_positions[idx]], dtype=torch.float32, device=self.device
-            )
-            mic_marker.set_pos(mic_pos_tensor, envs_idx=[idx])
+        # --- Audio simulation using the updated mic positions ---
+        cube_pos = self.cube.get_pos().cpu().numpy()
+        dists = [np.linalg.norm(mic_positions[i] - cube_pos[i]) for i in range(self.num_envs)]
 
-        # Simulate audio using unchanged logic
-        new_slice = self._collect_spectrograms(play_audio=False)
+        specs = []
+        for i, dist in enumerate(dists):
+            audio = self.simulate_audio(dist)
+            if i == self.listen_idx:
+                self.raw_audio_history.append(audio)
+
+            S_db = self._compute_spectrogram(audio)
+            specs.append(torch.from_numpy(S_db).float())
+
+        new_slice = torch.stack(specs, dim=0).to(self.device)
         self.audio_history.append(new_slice)
 
-        # Occasionally play stacked audio for verification
+        # Occasionally play the audio (stacked) for verification
         if self.listen_idx is not None and (self.step_count % self.show_every == 0):
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
@@ -355,7 +359,7 @@ class ReachCubeEgoAudioStackedEnv:
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
 
-        # Compute rewards based on unchanged distance logic
+        # Compute rewards based on distance to cube (unchanged)
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube_pos = self.cube.get_pos()
@@ -363,7 +367,6 @@ class ReachCubeEgoAudioStackedEnv:
         rewards = torch.clamp(torch.exp(-4 * (dist - 0.1)), 0.0, 1.0)
         dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        # Update current positions and step count
         self.pos = pos
         self.step_count += 1
 
