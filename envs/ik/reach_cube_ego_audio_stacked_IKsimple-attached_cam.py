@@ -140,12 +140,15 @@ class ReachCubeEgoAudioStackedEnv:
         ) * 0.1
         return tone + noise
 
-    def _compute_spectrogram(self, audio: np.ndarray) -> np.ndarray:
-        """
-        Convert a raw audio snippet to a dB spectrogram slice.
-        """
+    def _compute_spectrogram(self, audio: np.ndarray) -> torch.Tensor:
         S = librosa.stft(audio, n_fft=512, hop_length=256)
-        return librosa.amplitude_to_db(np.abs(S), ref=1.0)[:self.freq_bins, :9]
+        S_db = librosa.amplitude_to_db(np.abs(S), ref=1.0)[:self.freq_bins, :self.time_bins]
+
+        # Explicit normalization: [-20 dB, 120 dB] → [0,1]
+        S_db_normalized = (S_db + 20) / 140
+        S_db_normalized = np.clip(S_db_normalized, 0.0, 1.0)
+
+        return torch.from_numpy(S_db_normalized).float()
 
     def _collect_spectrograms(self, play_audio: bool = False) -> torch.Tensor:
         """
@@ -172,7 +175,7 @@ class ReachCubeEgoAudioStackedEnv:
                 sd.play(audio, 22050)
                 sd.wait()
 
-            specs.append(torch.from_numpy(S_db).float())
+            specs.append(S_db)
 
         # Count this step
         self.step_count += 1
