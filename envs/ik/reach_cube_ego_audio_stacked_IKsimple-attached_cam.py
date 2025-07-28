@@ -31,6 +31,7 @@ class ReachCubeEgoAudioStackedEnv:
         randomize_every: int = 100,
         history_length: int = 25,
         sample_offsets=None,
+        noise_config: dict = None,  # <-- ADD THIS
     ):
         # --- Configuration ---
         self.device = device
@@ -44,6 +45,9 @@ class ReachCubeEgoAudioStackedEnv:
         self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
         self.audio_history = deque(maxlen=self.history_length)
         self.raw_audio_history = deque(maxlen=self.history_length)
+
+        # Store noise config
+        self.noise_config = noise_config if noise_config else {"audio_noise_level": 0.0}
 
         # Spectrogram dimensions: freq bins and stacked time frames
         self.freq_bins = 257
@@ -123,12 +127,11 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
 
     def simulate_audio(self, dist: float) -> np.ndarray:
-        """
-        Generate a short burst (10ms) of audio: a distance-attenuated tone plus random noise.
-        """
         sr, dur = 22050, 0.01
         t = np.linspace(0, dur, int(sr * dur), endpoint=False)
         tone = chirp(t, f0=1000, f1=1000, t1=dur) / (dist ** 2 + 1e-6)
+
+        # Base random noise
         noise = sum(
             np.random.rand() * chirp(
                 t,
@@ -138,7 +141,12 @@ class ReachCubeEgoAudioStackedEnv:
             )
             for _ in range(5)
         ) * 0.1
-        return tone + noise
+
+        # Additional noise based on config
+        audio_noise_level = self.noise_config.get("audio_noise_level", 0.0)
+        additional_noise = np.random.normal(0, audio_noise_level, tone.shape)
+
+        return tone + noise + additional_noise
 
     def _compute_spectrogram(self, audio: np.ndarray) -> torch.Tensor:
         S = librosa.stft(audio, n_fft=512, hop_length=256)

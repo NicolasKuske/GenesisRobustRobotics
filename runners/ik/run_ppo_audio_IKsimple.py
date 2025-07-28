@@ -31,7 +31,13 @@ def create_environment(task_name):
 def train_ppo(args):
     # build environment
     env_cls = create_environment(args.task)
-    env = env_cls(vis=args.vis, device=args.device, num_envs=args.num_envs)
+    env = env_cls(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs,
+        noise_config={"audio_noise_level": args.audio_noise_level}
+    )
+
     print(f"\n [INFO] Created environment: {env}\n")
 
     agent = PPOAgentAudio(
@@ -105,7 +111,9 @@ def arg_parser():
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
     p.add_argument("-t", "--task", type=str, default="ReachCubeEgoAudio", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
+    p.add_argument("--audio_noise_level", type=float, default=0.0, help="Level of audio noise to apply")  # <-- ADD THIS
     return p.parse_args()
+
 
 def main():
     args = arg_parser()
