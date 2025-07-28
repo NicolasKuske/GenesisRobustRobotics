@@ -23,6 +23,11 @@ class ReachCubeEgoVisionStackedEnv:
         self.render_every = 5
         self._step_count = 0
 
+        # plotting of cameraframes
+        self.fig, self.axes = plt.subplots(2, 3, figsize=(8, 8))
+        plt.ion()  # Turn interactive mode on
+        plt.show()
+
         self.initial_pos = np.array([-0.9, 0.6, 0.7])[None, :]
         self.current_cube_pos = None
 
@@ -276,20 +281,23 @@ class ReachCubeEgoVisionStackedEnv:
 
         obs = self._build_observation()
 
+        # plot the stacked frames
+        if self.num_envs == 1 and self.step_count % 100 == 0:
+            frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
 
-        # optional display every 100 steps in single-env
-        #self.step_count += 1
-        #if self.num_envs == 1 and self.step_count % 100 == 0:
-        #    frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
-        #    plt.figure(figsize=(8,8))
-        #    for i in range(len(self.sample_offsets)):
-        #        ax = plt.subplot(2,3,i+1)
-        #        img = np.transpose(frames[i], (1,2,0))
-        #        ax.imshow(img)
-        #        ax.axis('off')
-        #    plt.suptitle(f"Stacked frames at step {self.step_count}")
-        #    plt.pause(0.1)
-        #    plt.show(block=False)
+            for i, ax in enumerate(self.axes.flatten()):
+                if i < len(self.sample_offsets):
+                    img = np.transpose(frames[i], (1, 2, 0))
+                    ax.clear()
+                    ax.imshow(img)
+                    ax.axis('off')
+                else:
+                    ax.clear()
+                    ax.axis('off')
+
+            self.fig.suptitle(f"Stacked frames at step {self.step_count}")
+            self.fig.canvas.draw_idle()  # Efficient redraw of canvas
+            self.fig.canvas.flush_events()  # Ensure GUI responsiveness
 
         obj_pos = self.cube.get_pos()
         gp_l = self.franka.get_link("left_finger").get_pos()
