@@ -258,9 +258,9 @@ class ReachCubeEgoAudioStackedEnv:
     def step(self, actions: torch.Tensor):
         # Define action step sizes
         d_radial = 0.05  # radial step size
-        d_angle = np.deg2rad(5)  # rotation step size
+        d_angle = np.deg2rad(10)  # rotation step size
         d_z = 0.05  # vertical step size
-        min_radius = 0.1  # minimum radius from center
+        min_radius = 0.05  # minimum radius from center
 
         # Clone current positions to modify safely
         pos = self.pos.clone()
