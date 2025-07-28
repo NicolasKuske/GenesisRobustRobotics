@@ -251,11 +251,11 @@ class ReachCubeTorqueEnv:
 
         reward = delta + bonus
         
-        joint_limit_penalty = -torch.sum(torch.relu(torch.abs(qpos) - safe_joint_limits), dim=1)
-	reward += joint_limit_penalty_weight * joint_limit_penalty
+        #joint_limit_penalty = -torch.sum(torch.relu(torch.abs(qpos) - safe_joint_limits), dim=1)
+	    #reward += joint_limit_penalty_weight * joint_limit_penalty
 
-	torque_penalty = -torch.norm(actions, dim=1)
-	reward += torque_penalty_weight * torque_penalty
+	    #torque_penalty = -torch.norm(actions, dim=1)
+	    #reward += torque_penalty_weight * torque_penalty
 
         
         

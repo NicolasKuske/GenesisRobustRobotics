@@ -80,12 +80,16 @@ class ReachCubeEgoVisionStackedEnv:
 
         # Camera setup
         self.cams = []
+        self.cam_transform = trans_quat_to_T(
+            np.array([0.03, 0, 0.03]),
+            xyz_to_quat(np.array([185, 0, 90]))
+        )
         for _ in range(self.num_envs):
             cam = self.scene.add_camera(res=(120,120), fov=90, GUI=True)
             self.cams.append(cam)
 
         # Build parallel environments
-        env_space = 10.0
+        env_space = 100.0
         self.scene.build(n_envs=self.num_envs, env_spacing=(env_space, env_space))
         self.envs_idx = np.arange(self.num_envs)
 
@@ -120,52 +124,21 @@ class ReachCubeEgoVisionStackedEnv:
 
     def _render(self):
         imgs = []
-        e = 0.1  # outward offset distance
         M = int(math.sqrt(self.num_envs))
-        env_space = 10.0
-
+        env_space = 100.0
         for idx, cam in enumerate(self.cams):
-            # Current end-effector position
             ee_pos = self.end_effector.get_pos(envs_idx=[idx])[0].cpu().numpy()
-
-            # Multi-environment offset calculation
-            col = idx // M
-            row = idx % M
-            x_off = (col - (M - 1) / 2) * env_space
-            y_off = (row - (M - 1) / 2) * env_space
+            ee_quat = self.end_effector.get_quat(envs_idx=[idx])[0].cpu().numpy()
+            col = idx // M; row = idx % M
+            x_off = (col - (M-1)/2) * env_space
+            y_off = (row - (M-1)/2) * env_space
             ee_pos_offset = ee_pos + np.array([x_off, y_off, 0.0])
-
-            # IMPORTANT FIX HERE:
-            # Compute radial direction relative to local environment center (x_off, y_off)
-            radial_xy = ee_pos_offset[:2] - np.array([x_off, y_off])
-            norm = np.linalg.norm(radial_xy)
-
-            if norm < 1e-6:
-                radial_dir = np.array([1.0, 0.0])
-            else:
-                radial_dir = radial_xy / norm
-
-            # Camera position outward along radial direction
-            cam_xy = radial_xy + e * radial_dir + np.array([x_off, y_off])
-            cam_z = ee_pos_offset[2]  # same height as end-effector
-            cam_pos = np.array([cam_xy[0], cam_xy[1], cam_z])
-
-            # Yaw to face outward along radial direction
-            yaw = np.arctan2(radial_dir[1], radial_dir[0]) - np.pi / 2
-            pitch = np.deg2rad(0)
-            roll = 45.0  # Adjust roll as desired
-
-            cam_quat = xyz_to_quat(np.rad2deg(np.array([roll, pitch, yaw])))
-            cam_T = trans_quat_to_T(cam_pos, cam_quat)
-
-            # Set camera pose
+            ee_T = trans_quat_to_T(ee_pos_offset, ee_quat)
+            cam_T = ee_T @ self.cam_transform
             cam.set_pose(transform=cam_T)
-
-            # Render frame
             rgb = cam.render()[0]
-            img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0
+            img = torch.from_numpy(rgb.copy()).permute(2,0,1).float() / 255.0
             imgs.append(img)
-
         return torch.stack(imgs, dim=0)
 
     def _build_observation(self):
