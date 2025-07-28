@@ -30,7 +30,7 @@ class ReachCubeEgoVisionStackedEnv:
         self.action_space = 6
 
         # Genesis scene setup
-        self.scene = gs.Scene(
+        self.scene = gs.Scene(show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0.0, 0.0, 0.2),
@@ -85,7 +85,7 @@ class ReachCubeEgoVisionStackedEnv:
             self.cams.append(cam)
 
         # Build parallel environments
-        env_space = 10.0
+        env_space = 100.0
         self.scene.build(n_envs=self.num_envs, env_spacing=(env_space, env_space))
         self.envs_idx = np.arange(self.num_envs)
 
@@ -122,7 +122,7 @@ class ReachCubeEgoVisionStackedEnv:
         imgs = []
         e = 0.1  # outward offset distance
         M = int(math.sqrt(self.num_envs))
-        env_space = 10.0
+        env_space = 100.0
 
         for idx, cam in enumerate(self.cams):
             # Current end-effector position
@@ -210,7 +210,7 @@ class ReachCubeEgoVisionStackedEnv:
         pos = self.pos.clone()
 
         M = int(math.sqrt(self.num_envs))
-        env_space = 10.0
+        env_space = 100.0
 
         for idx in range(self.num_envs):
             action = actions[idx].item()
