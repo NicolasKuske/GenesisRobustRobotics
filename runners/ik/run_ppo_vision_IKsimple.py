@@ -37,7 +37,13 @@ def create_environment(task_name):
 def train_ppo(args):
     # build environment
     env_cls = create_environment(args.task)
-    env = env_cls(vis=args.vis, device=args.device, num_envs=args.num_envs)
+    env = env_cls(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs,
+        noise_config={"visual_noise_level": args.visual_noise_level}
+    )
+
     print(f"\n [INFO] Created environment: {env}\n")
 
     # build agent
@@ -112,7 +118,9 @@ def arg_parser():
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
     p.add_argument("-t", "--task", type=str, default="ReachCubeVision", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
+    p.add_argument("--visual_noise_level", type=float, default=0.0, help="Level of visual noise (Gaussian noise std-dev)")  # <-- ADD THIS
     return p.parse_args()
+
 
 def main():
     args = arg_parser()

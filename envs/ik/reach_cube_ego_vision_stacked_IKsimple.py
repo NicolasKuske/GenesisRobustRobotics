@@ -9,7 +9,9 @@ from collections import deque
 from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 
 class ReachCubeEgoVisionStackedEnv:
-    def __init__(self, vis, device, num_envs=1, randomize_every=100):
+    def __init__(self, vis, device, num_envs=1, randomize_every=100,
+                 noise_config: dict = None,  # <-- ADD THIS
+                 ):
         self.device = device
         self.num_envs = num_envs
         self.randomize_every = randomize_every
@@ -23,11 +25,10 @@ class ReachCubeEgoVisionStackedEnv:
         self.render_every = 5
         self._step_count = 0
 
-        # plotting of cameraframes
-        self.fig, self.axes = plt.subplots(2, 3, figsize=(8, 8))
-        plt.ion()  # Turn interactive mode on
-        plt.show()
+        # Store noise configuration
+        self.noise_config = noise_config if noise_config else {"visual_noise_level": 0.0}
 
+        # cube position
         self.initial_pos = np.array([-0.9, 0.6, 0.7])[None, :]
         self.current_cube_pos = None
 
@@ -35,7 +36,7 @@ class ReachCubeEgoVisionStackedEnv:
         self.action_space = 6
 
         # Genesis scene setup
-        self.scene = gs.Scene(show_FPS=False,
+        self.scene = gs.Scene(
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0.0, 0.0, 0.2),
@@ -85,6 +86,10 @@ class ReachCubeEgoVisionStackedEnv:
 
         # Camera setup
         self.cams = []
+        self.cam_transform = trans_quat_to_T(
+            np.array([0.03, 0, 0.03]),
+            xyz_to_quat(np.array([185, 0, 90]))
+        )
         for _ in range(self.num_envs):
             cam = self.scene.add_camera(res=(120,120), fov=90, GUI=True)
             self.cams.append(cam)
@@ -125,49 +130,28 @@ class ReachCubeEgoVisionStackedEnv:
 
     def _render(self):
         imgs = []
-        e = 0.1  # outward offset distance
         M = int(math.sqrt(self.num_envs))
         env_space = 100.0
+        noise_level = self.noise_config.get("visual_noise_level", 0.0)
 
         for idx, cam in enumerate(self.cams):
-            # Current end-effector position
             ee_pos = self.end_effector.get_pos(envs_idx=[idx])[0].cpu().numpy()
-
-            # Multi-environment offset calculation
-            col = idx // M
+            ee_quat = self.end_effector.get_quat(envs_idx=[idx])[0].cpu().numpy()
+            col = idx // M;
             row = idx % M
             x_off = (col - (M - 1) / 2) * env_space
             y_off = (row - (M - 1) / 2) * env_space
             ee_pos_offset = ee_pos + np.array([x_off, y_off, 0.0])
-
-            # IMPORTANT FIX HERE:
-            # Compute radial direction relative to local environment center (x_off, y_off)
-            radial_xy = ee_pos_offset[:2] - np.array([x_off, y_off])
-            norm = np.linalg.norm(radial_xy)
-
-            if norm < 1e-6:
-                radial_dir = np.array([1.0, 0.0])
-            else:
-                radial_dir = radial_xy / norm
-
-            # Camera position outward along radial direction
-            cam_xy = radial_xy + e * radial_dir + np.array([x_off, y_off])
-            cam_z = ee_pos_offset[2]  # same height as end-effector
-            cam_pos = np.array([cam_xy[0], cam_xy[1], cam_z])
-
-            # Yaw to face outward along radial direction
-            yaw = np.arctan2(radial_dir[1], radial_dir[0]) - np.pi / 2
-            pitch = np.deg2rad(0)
-            roll = 45.5  # Adjust roll as desired
-
-            cam_quat = xyz_to_quat(np.rad2deg(np.array([roll, pitch, yaw])))
-            cam_T = trans_quat_to_T(cam_pos, cam_quat)
-
-            # Set camera pose
+            ee_T = trans_quat_to_T(ee_pos_offset, ee_quat)
+            cam_T = ee_T @ self.cam_transform
             cam.set_pose(transform=cam_T)
-
-            # Render frame
             rgb = cam.render()[0]
+
+            # Add Gaussian noise here
+            if noise_level > 0.0:
+                noise = np.random.normal(0, noise_level, rgb.shape)
+                rgb = np.clip(rgb + noise, 0, 255).astype(np.uint8)
+
             img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0
             imgs.append(img)
 
@@ -207,70 +191,20 @@ class ReachCubeEgoVisionStackedEnv:
         return self._build_observation()
 
     def step(self, actions):
-        d_radial = 0.05  # radial step distance
-        d_angle = np.deg2rad(5)  # angular step size
-        d_z = 0.05  # vertical step size
-        min_radius = 0.05  # Minimum allowed radius from local center
-
+        masks = [actions==i for i in range(6)]
         pos = self.pos.clone()
-
-        M = int(math.sqrt(self.num_envs))
-        env_space = 100.0
-
-        for idx in range(self.num_envs):
-            action = actions[idx].item()
-
-            ee_pos = pos[idx].cpu().numpy()
-
-            col = idx // M
-            row = idx % M
-            x_off = (col - (M - 1) / 2) * env_space
-            y_off = (row - (M - 1) / 2) * env_space
-            local_origin = np.array([x_off, y_off])
-
-            radial_xy = ee_pos[:2] - local_origin
-            radial_norm = np.linalg.norm(radial_xy)
-
-            # Handle edge-case (near-origin)
-            if radial_norm < 1e-6:
-                radial_dir = np.array([1.0, 0.0])
-            else:
-                radial_dir = radial_xy / radial_norm
-
-            tangent_dir = np.array([-radial_dir[1], radial_dir[0]])
-
-            # Apply actions with radius check
-            if action == 0:  # Forward along radial
-                ee_pos[:2] += radial_dir * d_radial
-            elif action == 1:  # Backward along radial, but prevent crossing local center
-                new_radial_norm = radial_norm - d_radial
-                if new_radial_norm < min_radius:
-                    new_radial_norm = min_radius  # stop at minimum radius
-                ee_pos[:2] = local_origin + radial_dir * new_radial_norm
-            elif action == 2:  # Rotate left around center
-                angle = d_angle
-                cos_a, sin_a = np.cos(angle), np.sin(angle)
-                rot_matrix = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
-                ee_pos[:2] = local_origin + rot_matrix @ radial_xy
-            elif action == 3:  # Rotate right around center
-                angle = -d_angle
-                cos_a, sin_a = np.cos(angle), np.sin(angle)
-                rot_matrix = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
-                ee_pos[:2] = local_origin + rot_matrix @ radial_xy
-            elif action == 4:  # Up
-                ee_pos[2] += d_z
-            elif action == 5:  # Down
-                ee_pos[2] -= d_z
-
-            pos[idx] = torch.from_numpy(ee_pos).to(self.device)
+        pos[masks[0],0] += 0.05; pos[masks[1],0] -= 0.05
+        pos[masks[2],1] += 0.05; pos[masks[3],1] -= 0.05
+        pos[masks[4],2] += 0.05; pos[masks[5],2] -= 0.05
 
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector, pos=pos, quat=self.quat
         )
-        self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
+        self.franka.control_dofs_position(qpos[:,:-2], self.motors_dof, self.envs_idx)
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
+        # frame-skip: render only every Nth step
         if self._step_count % self.render_every == 0:
             new_frame = self._render()
         else:
@@ -281,34 +215,29 @@ class ReachCubeEgoVisionStackedEnv:
 
         obs = self._build_observation()
 
-        # plot the stacked frames
+        # optional display every 100 steps in single-env
+        self.step_count += 1
         if self.num_envs == 1 and self.step_count % 100 == 0:
             frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
-
-            for i, ax in enumerate(self.axes.flatten()):
-                if i < len(self.sample_offsets):
-                    img = np.transpose(frames[i], (1, 2, 0))
-                    ax.clear()
-                    ax.imshow(img)
-                    ax.axis('off')
-                else:
-                    ax.clear()
-                    ax.axis('off')
-
-            self.fig.suptitle(f"Stacked frames at step {self.step_count}")
-            self.fig.canvas.draw_idle()  # Efficient redraw of canvas
-            self.fig.canvas.flush_events()  # Ensure GUI responsiveness
+            plt.figure(figsize=(8,8))
+            for i in range(len(self.sample_offsets)):
+                ax = plt.subplot(2,3,i+1)
+                img = np.transpose(frames[i], (1,2,0))
+                ax.imshow(img)
+                ax.axis('off')
+            plt.suptitle(f"Stacked frames at step {self.step_count}")
+            plt.pause(0.1)
+            plt.show(block=False)
 
         obj_pos = self.cube.get_pos()
         gp_l = self.franka.get_link("left_finger").get_pos()
         gp_r = self.franka.get_link("right_finger").get_pos()
-        dist = torch.norm(obj_pos - (gp_l + gp_r) / 2, dim=1)
-        rewards = torch.clamp(torch.exp(-4 * (dist - 0.1)), 0.0, 1.0)
+        dist = torch.norm(obj_pos - (gp_l + gp_r)/2, dim=1)
+        rewards = torch.clamp(torch.exp(-4*(dist-0.1)), 0.0, 1.0)
         dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         self.pos = pos
         return obs, rewards, dones
-
 
 if __name__ == "__main__":
     gs.init(backend=gs.gpu)
