@@ -36,7 +36,7 @@ class ReachCubeEgoVisionStackedEnv:
         self.action_space = 6
 
         # Genesis scene setup
-        self.scene = gs.Scene(
+        self.scene = gs.Scene(show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0.0, 0.0, 0.2),
