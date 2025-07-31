@@ -22,16 +22,16 @@ class ReachCubeEgoAudioStackedEnv:
     """
 
     def __init__(
-            self,
-            vis: bool,
-            device: torch.device,
-            num_envs: int = 1,
-            listen_idx: int = 0,
-            show_every: int = 10,
-            randomize_every: int = 100,
-            history_length: int = 25,
-            sample_offsets=None,
-            noise_config: dict = None,
+        self,
+        vis: bool,
+        device: torch.device,
+        num_envs: int = 1,
+        listen_idx: int = 0,
+        show_every: int = 10,
+        randomize_every: int = 100,
+        history_length: int = 25,
+        sample_offsets=None,
+        noise_config: dict = None,  # <-- ADD THIS
     ):
         # --- Configuration ---
         self.device = device
@@ -49,37 +49,23 @@ class ReachCubeEgoAudioStackedEnv:
         # Store noise config
         self.noise_config = noise_config if noise_config else {"audio_noise_level": 0.0}
 
-        # Spectrogram dimensions
+        # Spectrogram dimensions: freq bins and stacked time frames
         self.freq_bins = 257
         self.time_bins = len(self.sample_offsets)
-        self.obs_shape = (1, self.freq_bins, self.time_bins)
+        self.obs_shape = (1, self.freq_bins, self.time_bins) #(1,257,5)
         self.action_space = 6
 
-        # Matplotlib figure
+        # Matplotlib figure for live preview
         self._fig = plt.figure("Stacked Spectrogram Preview")
 
-        # Build scene and robot
+        # Build the simulation scene and initialize the robot
         self._build_scene(vis)
         self._init_robot()
 
-        # Counters & state
+        # Internal counters and state
         self.step_count = 0
         self.episode_count = 0
         self.current_cube_pos = None
-
-        # Reward shaping (copied from torque script)
-        self.success_thresh = 0.30
-        self.success_bonus = 0.1
-        self.shaping_coef = 10.0
-        self.k = 0.5
-        self.dist_offset = 0.0
-        self.prev_dist = None
-
-        # Episode reward tracking
-        self.sum_delta = torch.zeros(self.num_envs, device=self.device)
-        self.sum_success = torch.zeros(self.num_envs, device=self.device)
-        self.episode_reward = 0.0
-
 
     def _build_scene(self, show_viewer: bool):
         """Set up the Genesis scene, ground plane, robot, and cube."""
@@ -213,11 +199,16 @@ class ReachCubeEgoAudioStackedEnv:
         return stacked.unsqueeze(1)
 
     def reset(self) -> torch.Tensor:
+        """
+        Reset the envs: randomize the cube, re-init the robot, clear history,
+        populate with the first slice, and return the initial stacked obs.
+        """
         self.episode_count += 1
-
-        # Randomize cube position periodically
+        # Decide new cube position
         if self.episode_count == 1:
-            one_pos = np.array([[-0.9, 0.6, 0.7]]).reshape(1, 3)
+            one_pos = np.array([[-0.9, 0.6, 0.7]]).reshape(1, 3)   #default_position
+       	    #one_pos = np.array([[-0.5, 0.3, 0.7]]).reshape(1, 3)  #new_position1
+            #one_pos = np.array([[0.1, 0.5, 0.3]]).reshape(1, 3)   #new_position2
         elif self.episode_count % self.randomize_every == 0:
             xy = np.random.uniform(0.2, 1.0, size=(1, 2)) * np.random.choice([-1, 1], size=(1, 2))
             z = np.random.uniform(0.1, 1.0, size=(1, 1))
@@ -226,40 +217,37 @@ class ReachCubeEgoAudioStackedEnv:
             one_pos = self.current_cube_pos[:1]
 
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
-
-        # Reset robot and cube
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
-
-        # Reset reward trackers exactly as in torque script
-        self.sum_delta.zero_()
-        self.sum_success.zero_()
-        self.episode_reward = 0.0
 
         # Reset histories
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
-        # Collect initial spectrogram slice
+        # Collect the first slice (fills raw_audio_history once)
         first_spec = self._collect_spectrograms(play_audio=False)
+        # Extract that first raw audio snippet
         first_raw = self.raw_audio_history[-1].copy()
+
+        # Populate full history with clones
+        self.audio_history.clear()
+        self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        # Initialize prev_dist for shaping rewards
-        left = self.franka.get_link("left_finger").get_pos()
-        right = self.franka.get_link("right_finger").get_pos()
-        cube = self.cube.get_pos()
-        self.prev_dist = torch.norm((left + right) / 2 - cube, dim=1)
-
+        # Build and optionally plot initial obs
         obs = self._build_observation()
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
         return obs
 
     def step(self, actions: torch.Tensor):
+        """
+        Apply the discrete action, step the sim, update histories,
+        optionally play the full stacked audio window, and compute rewards.
+        """
         # Move end-effector by fixed deltas
         deltas = torch.tensor([
             [0.05, 0, 0], [-0.05, 0, 0], [0, 0.05, 0],
@@ -276,43 +264,29 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
-        # Collect new slice
+        # Collect new slice (no immediate slice playback)
         new_slice = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(new_slice)
 
-        # Audio playback periodically
+        # Play the full stacked audio window at intervals
         if self.listen_idx is not None and (self.step_count % self.show_every == 0):
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
             sd.play(full_buffer, 22050)
             sd.wait()
 
-        # Build observation
+        # Build observation and optionally visualize
         obs = self._build_observation()
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
 
-        # Reward computation exactly as torque script
+        # Compute reward based on distance to cube
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube_pos = self.cube.get_pos()
-        dist_new = torch.norm((left + right) / 2 - cube_pos, dim=1)
-
-        delta = self.shaping_coef * (
-                torch.exp(-self.k * (dist_new - self.dist_offset))
-                - torch.exp(-self.k * (self.prev_dist - self.dist_offset))
-        )
-        success = (dist_new < self.success_thresh).float()
-        bonus = success * self.success_bonus
-        rewards = delta + bonus
-
-        # Update trackers exactly as torque script
-        self.sum_delta += delta
-        self.sum_success += bonus
-        self.episode_reward += rewards.mean().item()
-        self.prev_dist = dist_new
-
-        dones = success.bool()
+        dist = torch.norm((left + right) / 2 - cube_pos, dim=1)
+        rewards = torch.clamp(torch.exp(-4 * (dist - 0.1)), 0.0, 1.0)
+        dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, rewards, dones
 
