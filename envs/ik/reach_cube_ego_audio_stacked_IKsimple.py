@@ -32,11 +32,6 @@ class ReachCubeEgoAudioStackedEnv:
             history_length: int = 25,
             reward_thresholds=None,
             window_size: int = 4,
-            success_thresh: float = 0.30,
-            success_bonus: float = 0.1,
-            shaping_coef: float = 10.0,
-            k: float = 0.5,
-            dist_offset: float = 0.0,
             sample_offsets=None,
             noise_config: dict = None,
     ):
@@ -66,7 +61,8 @@ class ReachCubeEgoAudioStackedEnv:
         # Curriculum parameters (exactly from torque script)
         self.episodes_per_position = episodes_per_position
         self.window_size = window_size
-        self.reward_thresholds = reward_thresholds or [2, 2, 2, 2, 2.5, 2.5, 2.5]
+        self.reward_thresholds = reward_thresholds or [3, 3, 3, 3, 4,5, 6]  # Adjust based on desired difficulty progression
+
         self.last_rewards = deque(maxlen=self.window_size)
         self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
         self.fixed_x = 0.6
@@ -74,17 +70,8 @@ class ReachCubeEgoAudioStackedEnv:
         self.x_stage = 0
         self.completed = False
 
-        # Reward shaping
-        self.success_thresh = success_thresh
-        self.success_bonus = success_bonus
-        self.shaping_coef = shaping_coef
-        self.k = k
-        self.dist_offset = dist_offset
-        self.prev_dist = None
 
         # Episode tracking
-        self.sum_delta = torch.zeros(self.num_envs, device=self.device)
-        self.sum_success = torch.zeros(self.num_envs, device=self.device)
         self.episode_reward = 0.0
 
 
@@ -194,7 +181,7 @@ class ReachCubeEgoAudioStackedEnv:
         specs = []
         for i, dist in enumerate(dists):
             audio = self.simulate_audio(dist)
-            # Store raw audio only for the listener index
+            # Store raw audio only for debugging/playback purposes (listener index)
             if i == self.listen_idx:
                 self.raw_audio_history.append(audio)
 
@@ -232,8 +219,6 @@ class ReachCubeEgoAudioStackedEnv:
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        self.sum_delta.zero_()
-        self.sum_success.zero_()
         self.episode_reward = 0.0
 
         first_spec = self._collect_spectrograms(play_audio=False)
@@ -244,13 +229,9 @@ class ReachCubeEgoAudioStackedEnv:
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        left = self.franka.get_link("left_finger").get_pos()
-        right = self.franka.get_link("right_finger").get_pos()
-        cube = self.cube.get_pos()
-        self.prev_dist = torch.norm((left + right) / 2 - cube, dim=1)
 
         obs = self._build_observation()
-        if self.num_envs == 1:
+        if self.num_envs == 1 and self.scene.show_viewer:
             self._plot_stacked(obs[0, 0])
         return obs
 
@@ -285,32 +266,28 @@ class ReachCubeEgoAudioStackedEnv:
 
         # Build observation
         obs = self._build_observation()
-        if self.num_envs == 1 and self.step_count % self.show_every == 0:
+        if self.num_envs == 1 and self.step_count % self.show_every == 0 and self.scene.show_viewer:
+
             self._plot_stacked(obs[0, 0])
 
-        # Reward computation exactly as torque script
+        # Simplified exponential reward function
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube_pos = self.cube.get_pos()
-        dist_new = torch.norm((left + right) / 2 - cube_pos, dim=1)
+        dist = torch.norm((left + right) / 2 - cube_pos, dim=1)
 
-        delta = self.shaping_coef * (
-                torch.exp(-self.k * (dist_new - self.dist_offset))
-                - torch.exp(-self.k * (self.prev_dist - self.dist_offset))
-        )
-        success = (dist_new < self.success_thresh).float()
-        bonus = success * self.success_bonus
-        rewards = delta + bonus
+        rewards = torch.clamp(torch.exp(-4 * dist), 0.0, 1.0)
 
-        # Update trackers exactly as torque script
-        self.sum_delta += delta
-        self.sum_success += bonus
+        # Update trackers to keep compatibility with existing curriculum logging
         self.episode_reward += rewards.mean().item()
-        self.prev_dist = dist_new
 
-        dones = success.bool()
 
+        # Dones logic: keep as zeros since no success threshold is used
+        dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        
         return obs, rewards, dones
+
+
 
     def _plot_stacked(self, data: torch.Tensor):
         """
@@ -329,31 +306,16 @@ class ReachCubeEgoAudioStackedEnv:
     def _sample_cube_pos(self) -> np.ndarray:
         idx = min(self.x_stage, self.max_stages - 1)
         lower = self.x_bounds[idx]
-        
-        #each env own cube position
-        #x = np.random.uniform(lower, self.fixed_x, (self.num_envs, 1))
-        #y = np.random.uniform(-0.6, 0.6, (self.num_envs, 1))
-        #z = np.random.uniform(0.1, 1.0, (self.num_envs, 1))
-        #return np.concatenate([x, y, z], axis=1)
-        
-        #each env same cube position
-        x = np.random.uniform(lower, self.fixed_x, (1, 1))
-        y = np.random.uniform(-0.6, 0.6, (1, 1))
-        z = np.random.uniform(0.1, 1.0, (1, 1))
-        single_pos = np.concatenate([x, y, z], axis=1)
-        return np.repeat(single_pos, self.num_envs, axis=0)
-        
-        
-        
-        
+        x = np.random.uniform(lower, self.fixed_x, (self.num_envs, 1))
+        y = np.random.uniform(-0.6, 0.6, (self.num_envs, 1))
+        z = np.random.uniform(0.1, 1.0, (self.num_envs, 1))
+        return np.concatenate([x, y, z], axis=1)
 
     def _process_episode_end(self):
-        shaping = self.sum_delta.mean().item()
-        bonus = self.sum_success.mean().item()
-        total = self.episode_reward
-        print(f"[Episode {self.episode_count}] Shaping: {shaping:.4f}, Bonus: {bonus:.4f}, Total: {total:.4f}")
+        print(f"[Episode {self.episode_count}] Total: {self.episode_reward:.4f}")
 
-        self.last_rewards.append(total)
+
+        self.last_rewards.append(self.episode_reward)
         if len(self.last_rewards) == self.window_size:
             mean_r = sum(self.last_rewards) / self.window_size
             thr = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds) - 1)]
