@@ -28,9 +28,9 @@ class ReachCubeEgoAudioStackedEnv:
             num_envs: int = 1,
             listen_idx: int = 0,
             show_every: int = 10,
-            episodes_per_position: int = 15,
+            episodes_per_position: int = 2,
             history_length: int = 25,
-            reward_thresholds=None,
+            reward_thresholds=[3],
             window_size: int = 4,
             success_thresh: float = 0.30,
             success_bonus: float = 0.1,
@@ -66,13 +66,17 @@ class ReachCubeEgoAudioStackedEnv:
         # Curriculum parameters (exactly from torque script)
         self.episodes_per_position = episodes_per_position
         self.window_size = window_size
-        self.reward_thresholds = reward_thresholds or [1, 1, 1, 1, 1, 1, 3]
-        self.last_rewards = deque(maxlen=self.window_size)
-        self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
-        self.fixed_x = 0.6
-        self.max_stages = len(self.x_bounds)
-        self.x_stage = 0
+        self.reward_threshold = reward_thresholds[0] if reward_thresholds else 3
+        self.x_bounds = [-0.6, 0.6]  # Directly use the full range
+        self.fixed_x = None  # No fixed x anymore
         self.completed = False
+        self.reward_threshold = reward_thresholds[0] if reward_thresholds else 3
+        self.x_bounds = [-0.6, 0.6]
+        self.fixed_x = None
+        self.completed = False
+
+        # Add this line back:
+        self.last_rewards = deque(maxlen=self.window_size)
 
         # Reward shaping
         self.success_thresh = success_thresh
@@ -327,9 +331,7 @@ class ReachCubeEgoAudioStackedEnv:
         self._fig.canvas.flush_events()
 
     def _sample_cube_pos(self) -> np.ndarray:
-        idx = min(self.x_stage, self.max_stages - 1)
-        lower = self.x_bounds[idx]
-        x = np.random.uniform(lower, self.fixed_x, (self.num_envs, 1))
+        x = np.random.uniform(self.x_bounds[0], self.x_bounds[1], (self.num_envs, 1))
         y = np.random.uniform(-0.6, 0.6, (self.num_envs, 1))
         z = np.random.uniform(0.1, 1.0, (self.num_envs, 1))
         return np.concatenate([x, y, z], axis=1)
@@ -343,23 +345,11 @@ class ReachCubeEgoAudioStackedEnv:
         self.last_rewards.append(total)
         if len(self.last_rewards) == self.window_size:
             mean_r = sum(self.last_rewards) / self.window_size
-            thr = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds) - 1)]
-            print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thr:.4f}")
-            if mean_r > thr:
-                self._advance_stage()
-
-    def _advance_stage(self):
-        self.x_stage += 1
-        if self.x_stage < self.max_stages:
-            lb = self.x_bounds[self.x_stage]
-            print(f"Advanced to stage {self.x_stage}: X ∈ [{lb:.2f}, {self.fixed_x:.2f}]")
-            self.last_rewards.clear()
-        else:
-            self.completed = True
-            print("Curriculum complete!")
-
-
-
+            print(f"[Evaluation] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {self.reward_threshold:.4f}")
+            if mean_r > self.reward_threshold:
+                self.completed = True
+                print("Performance threshold reached! Saving checkpoint...")
+                self.last_rewards.clear()
 
 
 
