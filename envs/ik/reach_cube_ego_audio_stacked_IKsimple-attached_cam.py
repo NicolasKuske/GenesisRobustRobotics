@@ -285,7 +285,7 @@ class ReachCubeEgoAudioStackedEnv:
         right = self.franka.get_link("right_finger").get_pos()
         cube_pos = self.cube.get_pos()
         dist = torch.norm((left + right) / 2 - cube_pos, dim=1)
-        rewards = torch.clamp(torch.exp(-4 * (dist - 0.1)), 0.0, 1.0)
+        rewards = torch.clamp(torch.exp(-4 * (dist)), 0.0, 1.0)
         dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, rewards, dones
