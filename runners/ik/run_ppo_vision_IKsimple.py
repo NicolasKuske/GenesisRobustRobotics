@@ -50,7 +50,7 @@ def train_ppo(args):
     agent = PPOAgentVision(
         obs_shape=env.obs_shape,  # use obs_shape instead of input_dim
         action_shape=env.action_space,
-        lr=1e-4,
+        lr=1e-5,
         gamma=0.99,
         clip_epsilon=0.2,
         device=args.device,
@@ -81,7 +81,7 @@ def run(env, agent, args, writer):
 
         states, actions, rewards, dones = [], [], [], []
 
-        for step in range(200):
+        for step in range(100):
             action = agent.select_action(state)
             next_state, reward, done = env.step(action)
 
