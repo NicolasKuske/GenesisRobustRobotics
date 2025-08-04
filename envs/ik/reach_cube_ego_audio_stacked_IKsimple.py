@@ -13,12 +13,16 @@ import sounddevice as sd
 
 class ReachCubeEgoAudioStackedEnv:
     """
-    Genesis environment with audio-only observations and random cube repositioning.
+    Genesis environment with audio-only observations and configurable cube repositioning schedule.
     Observations are stacked spectrogram frames over a short history.
 
     Each step returns an observation tensor of shape (num_envs, 1, F, T),
     where F is the number of frequency bins and T is the number of stacked time frames.
     Optionally plays back the full stacked audio window for the designated listener index.
+
+    The cube alternates between two fixed positions: [0.2, -0.8, 0.2] (easy) and [0.2, 0.8, 0.2] (hard).
+    It stays at the easy position for `easy_episodes` episodes, then at the hard position for
+    `easy_episodes * hard_multiplier` episodes, repeating this cycle indefinitely.
     """
 
     def __init__(
@@ -28,17 +32,24 @@ class ReachCubeEgoAudioStackedEnv:
         num_envs: int = 1,
         listen_idx: int = 0,
         show_every: int = 10,
-        randomize_every: int = 2,
+        easy_episodes: int = 2,
+        hard_multiplier: int = 3,
         history_length: int = 25,
         sample_offsets=None,
-        noise_config: dict = None,  # <-- ADD THIS
+        noise_config: dict = None,
     ):
         # --- Configuration ---
         self.device = device
         self.num_envs = num_envs
         self.listen_idx = listen_idx
         self.show_every = show_every
-        self.randomize_every = randomize_every
+        # Number of episodes in the easy segment
+        self.easy_episodes = easy_episodes
+        # Factor for how many times longer the hard segment is
+        self.hard_multiplier = hard_multiplier
+        # Compute hard segment length and full cycle length
+        self.hard_episodes = self.easy_episodes * self.hard_multiplier
+        self.cycle_length = self.easy_episodes + self.hard_episodes
 
         # History for spectrograms and raw audio
         self.history_length = history_length
@@ -52,7 +63,7 @@ class ReachCubeEgoAudioStackedEnv:
         # Spectrogram dimensions: freq bins and stacked time frames
         self.freq_bins = 257
         self.time_bins = len(self.sample_offsets)
-        self.obs_shape = (1, self.freq_bins, self.time_bins) #(1,257,5)
+        self.obs_shape = (1, self.freq_bins, self.time_bins)
         self.action_space = 6
 
         # Matplotlib figure for live preview
@@ -200,35 +211,29 @@ class ReachCubeEgoAudioStackedEnv:
 
     def reset(self) -> torch.Tensor:
         """
-        Reset the envs: alternate cube position between two fixed points every `randomize_every` episodes,
-        re-init the robot, clear history, populate with the first slice, and return the initial stacked obs.
+        Reset the envs: reposition the cube according to the easy/hard schedule,
+        re-init the robot, clear history, populate with the first slice,
+        and return the initial stacked obs.
+
+        Easy for `easy_episodes`, then hard for `easy_episodes * hard_multiplier`, repeating.
         """
         self.episode_count += 1
-
-        # Alternate between two predefined cube positions
-        if self.episode_count == 1:
-            # Start at the first position
+        # Determine position in cycle (0-indexed)
+        idx = (self.episode_count - 1) % self.cycle_length
+        if idx < self.easy_episodes:
+            # Easy segment
             one_pos = np.array([[0.2, -0.8, 0.2]])
-        elif self.episode_count % self.randomize_every == 0:
-            # Determine which of the two to use based on how many times we've randomized so far
-            cycle = (self.episode_count // self.randomize_every)
-            if cycle % 2 == 1:
-                # On the 1st, 3rd, 5th... randomization, use the second position
-                one_pos = np.array([[0.2,  0.8, 0.2]])
-            else:
-                # On the 2nd, 4th, 6th... randomization, use the first position
-                one_pos = np.array([[0.2, -0.8, 0.2]])
         else:
-            # Keep the cube at its current position
-            one_pos = self.current_cube_pos[:1]
+            # Hard segment
+            one_pos = np.array([[0.2,  0.8, 0.2]])
 
-        # Apply across all envs
+        # Broadcast across all envs
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # Reset audio histories
+        # Reset histories
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
