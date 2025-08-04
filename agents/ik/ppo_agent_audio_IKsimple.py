@@ -49,17 +49,24 @@ class PPOAgentAudio:
         self.model.eval()
         print(f"Checkpoint loaded from {self.checkpoint_path}")
 
-    def select_action(self, state):
+    def select_action(self, state, inference=False):
         """
         state: tensor of shape (num_envs, C, H, W), float32 in [0,1]
+        inference: bool, True selects greedy actions, False samples from distribution
         returns: tensor of shape (num_envs,) with discrete actions
         """
         state = state.to(self.device)
         with torch.no_grad():
             _, logits = self.model(state)
+
         probs = nn.functional.softmax(logits, dim=-1)
         dist = Categorical(probs)
-        action = dist.sample()
+
+        if inference:
+            action = torch.argmax(probs, dim=-1)
+        else:
+            action = dist.sample()
+
         return action
 
     def train(self, states, actions, rewards, dones):

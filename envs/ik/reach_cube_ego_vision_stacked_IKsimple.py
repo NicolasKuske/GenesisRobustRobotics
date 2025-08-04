@@ -10,7 +10,7 @@ from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 
 class ReachCubeEgoVisionStackedEnv:
     def __init__(self, vis, device, num_envs=1, randomize_every=100,
-                 noise_config: dict = None,  # <-- ADD THIS
+                 noise_config: dict = None,
                  ):
         self.device = device
         self.num_envs = num_envs

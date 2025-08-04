@@ -1,4 +1,4 @@
-#runners/ik/run_ppo_audio_IKsimple.py
+# runners/ik/run_ppo_audio_IKsimple.py
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
@@ -8,7 +8,6 @@ from pathlib import Path
 
 # Adds the root directory (two levels up from this file) to sys.path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
-
 
 import argparse
 import genesis as gs
@@ -29,7 +28,6 @@ def create_environment(task_name):
     raise ValueError(f"\n Task '{task_name}' is not recognized.\n")
 
 def train_ppo(args):
-    # build environment
     env_cls = create_environment(args.task)
     env = env_cls(
         vis=args.vis,
@@ -37,8 +35,6 @@ def train_ppo(args):
         num_envs=args.num_envs,
         noise_config={"audio_noise_level": args.audio_noise_level}
     )
-
-    print(f"\n [INFO] Created environment: {env}\n")
 
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
@@ -52,31 +48,33 @@ def train_ppo(args):
         checkpoint_path=args.checkpoint_path
     )
 
-    # TensorBoard logger
     writer = SummaryWriter(log_dir=f"runs/{args.task}")
 
-    # start training loop
-    if args.device.lower() == "mps":  # for MacOS
-        gs.tools.run_in_another_thread(fn=run, args=(env, agent, args, writer))
-        env.scene.viewer.start()
-    else:
-        run(env, agent, args, writer)
+    run(env, agent, args, writer)
 
     writer.close()
+
 
 def run(env, agent, args, writer):
     num_episodes = 1000000
 
     for episode in range(num_episodes):
-        state = env.reset()  # shape: (3,120,120)
+        state, done_array = env.reset()
+        if done_array.all():
+            print("\n[INFO] Curriculum complete, ending training.\n")
+            break
+
         total_reward = torch.zeros(env.num_envs).to(args.device)
-        done_array = torch.zeros(env.num_envs, dtype=torch.bool).to(args.device)
 
         states, actions, rewards, dones = [], [], [], []
 
-        for step in range(100):
+        for step in range(200):
             action = agent.select_action(state)
             next_state, reward, done = env.step(action)
+
+            if next_state is None:  # Curriculum completed during step
+                done_array = torch.ones(env.num_envs, dtype=torch.bool).to(args.device)
+                break
 
             states.append(state)
             actions.append(action)
@@ -91,29 +89,91 @@ def run(env, agent, args, writer):
 
         agent.train(states, actions, rewards, dones)
 
-        if episode % 5 == 0:
+        if episode % 3 == 0:
             agent.save_checkpoint()
+            print(f"\n Saved checkpoint to logs :)\n ")
 
         mean_reward = total_reward.mean().item()
         writer.add_scalar('Reward/Mean', mean_reward, episode)
 
-        print(f"\n [Episode {episode}] Total Reward: {total_reward}  Mean Reward: {mean_reward}\n ")
+        # Added this line clearly at the end of the episode:
+        print(f"[Episode {episode}] Mean Reward: {mean_reward:.4f}, Total Reward: {total_reward}\n")
+
+
+
+@torch.no_grad()
+def inference_ppo(args):
+    env_cls = create_environment(args.task)
+    env = env_cls(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs,
+        episodes_per_position=1,
+        noise_config={"audio_noise_level": args.audio_noise_level}
+    )
+
+    env.x_stage = env.max_stages
+    print(f"[INFO] Inference environment (full curriculum range): {env}")
+
+    agent = PPOAgentAudio(
+        obs_shape=env.obs_shape,
+        action_shape=env.action_space,
+        lr=1e-3,
+        gamma=0.99,
+        clip_epsilon=0.2,
+        device=args.device,
+        load=True,
+        num_envs=args.num_envs,
+        checkpoint_path=args.checkpoint_path
+    )
+
+    print(f"[INFO] Loaded checkpoint from {args.checkpoint_path}")
+
+    writer = SummaryWriter(log_dir=f"runs/{args.task}_inference")
+
+    for ep in range(args.num_episodes):
+        state, done_array = env.reset()
+
+        if state is None:
+            print("[INFO] Environment returned None on reset, ending inference.")
+            break
+
+        steps = 0
+        total_reward = torch.zeros(args.num_envs).to(args.device)
+
+        while steps < 100:
+            action = agent.select_action(state, inference=True)
+            next_state, reward, done = env.step(action)
+
+            if next_state is None:
+                print("[INFO] Environment returned None during step, stopping current episode.")
+                break
+
+            total_reward += reward
+            state = next_state
+            steps += 1
+
+        mean_reward = total_reward.mean().item()
+        writer.add_scalar('Inference/MeanReward', mean_reward, ep)
+        writer.add_scalar('Inference/Steps', steps, ep)
+
+        print(f"[Inference {ep+1}/{args.num_episodes}] Steps: {steps}, Mean Reward: {mean_reward:.3f}")
+
+    writer.close()
 
 
 def arg_parser():
     p = argparse.ArgumentParser()
     p.add_argument("-v", "--vis", action="store_true", help="Enable visualization")
-    p.add_argument(
-        "-l", "--load_path",
-        nargs="?", const="default", default=None,
-        help="`-l` alone loads default checkpoint; `-l path.pth` loads that file"
-    )
+    p.add_argument("-l", "--load_path", nargs="?", const="default", default=None,
+                   help="`-l` alone loads default checkpoint; `-l path.pth` loads that file")
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
     p.add_argument("-t", "--task", type=str, default="ReachCubeEgoAudio", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
-    p.add_argument("--audio_noise_level", type=float, default=0.0, help="Level of audio noise to apply")  # <-- ADD THIS
+    p.add_argument("--audio_noise_level", type=float, default=0.0, help="Level of audio noise")
+    p.add_argument("-m", "--mode", choices=['train', 'inference'], default='train', help="Run mode")
+    p.add_argument("--num_episodes", type=int, default=10, help="Episodes for inference mode")
     return p.parse_args()
-
 
 def main():
     args = arg_parser()
@@ -129,18 +189,17 @@ def main():
 
     os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
 
-    if args.load:
-        print(f"\n[INFO] Loading checkpoint from: {args.checkpoint_path}\n")
-        if not os.path.isfile(args.checkpoint_path):
-            print(f"\n[ERROR] Checkpoint not found: {args.checkpoint_path}\n")
-            sys.exit(1)
-    else:
-        print("\n[INFO] No checkpoint provided; training from scratch.\n")
+    if args.load and not os.path.isfile(args.checkpoint_path):
+        print(f"[ERROR] Checkpoint not found: {args.checkpoint_path}")
+        sys.exit(1)
 
     backend = gs.cpu if args.device.lower().startswith("cpu") else gs.gpu
     gs.init(backend=backend)
 
-    train_ppo(args)
+    if args.mode == 'train':
+        train_ppo(args)
+    else:
+        inference_ppo(args)
 
 if __name__ == "__main__":
     main()
