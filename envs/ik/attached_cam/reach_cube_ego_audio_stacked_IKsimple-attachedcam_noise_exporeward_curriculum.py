@@ -1,4 +1,4 @@
-#envs/ik/reach_cube_ego_audio_stacked_IKsimple.py
+# envs/ik/reach_cube_ego_audio_stacked_IKsimple.py
 
 
 import numpy as np
@@ -26,19 +26,23 @@ class ReachCubeEgoAudioStackedEnv:
             vis: bool,
             device: torch.device,
             num_envs: int = 1,
-            listen_idx: int = 0,
+            listen_idx=None,  #: int = 0,
             show_every: int = 10,
-            episodes_per_position: int = 3,
+            episodes_per_position: int = 2,
             history_length: int = 25,
             reward_thresholds=None,
-            window_size: int = 4,
+            window_size: int = 9,
             sample_offsets=None,
             noise_config: dict = None,
+            initial_cube_pos=None,  # [-0.9, 0.6, 0.7],
+
     ):
+        self.initial_cube_pos = initial_cube_pos
         self.device = device
         self.num_envs = num_envs
         self.listen_idx = listen_idx
         self.show_every = show_every
+        self.vis = vis
 
         self.history_length = history_length
         self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
@@ -61,7 +65,8 @@ class ReachCubeEgoAudioStackedEnv:
         # Curriculum parameters (exactly from torque script)
         self.episodes_per_position = episodes_per_position
         self.window_size = window_size
-        self.reward_thresholds = reward_thresholds or [3, 3, 3, 3, 3.5, 3.5, 3.5]  # Adjust based on desired difficulty progression
+        self.reward_thresholds = reward_thresholds or [25, 25, 25, 25, 25, 25,
+                                                       30]  # Adjust based on desired difficulty progression
 
         self.last_rewards = deque(maxlen=self.window_size)
         self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
@@ -70,16 +75,13 @@ class ReachCubeEgoAudioStackedEnv:
         self.x_stage = 0
         self.completed = False
 
-
         # Episode tracking
         self.episode_reward = 0.0
 
-
-
-    def _build_scene(self, show_viewer: bool):
+    def _build_scene(self, vis: bool):
         """Set up the Genesis scene, ground plane, robot, and cube."""
         self.scene = gs.Scene(
-            show_FPS=False,
+            # show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5),
                 camera_lookat=(0, 0, 0.2),
@@ -89,7 +91,7 @@ class ReachCubeEgoAudioStackedEnv:
             ),
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
-            show_viewer=show_viewer,
+            show_viewer=vis,
         )
 
         # Add environment entities
@@ -207,13 +209,28 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
-    def reset(self) -> torch.Tensor:
-        if self.episode_count > 0:
+    def reset(self):
+        # Call _process_episode_end ONLY if this is not the very first reset call
+        if self.episode_count >= 1:
             self._process_episode_end()
+
         self.episode_count += 1
 
+        if self.completed:
+            dones = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            return None, dones
+
+        # Sample new cube position only every episodes_per_position episodes
         if (self.episode_count - 1) % self.episodes_per_position == 0:
-            self.current_cube_pos = self._sample_cube_pos()
+            if self.episode_count == 1 and self.initial_cube_pos is not None:
+                self.current_cube_pos = np.repeat(
+                    np.array([self.initial_cube_pos]), self.num_envs, axis=0
+                )
+            else:
+                self.current_cube_pos = self._sample_cube_pos_shared()
+
+            # Print cube positions clearly at reset
+            print(f"[Episode {self.episode_count}] Cube X positions: {self.current_cube_pos[:, 0]}")
 
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
@@ -222,21 +239,28 @@ class ReachCubeEgoAudioStackedEnv:
         self.episode_reward = 0.0
 
         first_spec = self._collect_spectrograms(play_audio=False)
-        first_raw = self.raw_audio_history[-1].copy()
         self.audio_history.clear()
-        self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
-            self.raw_audio_history.append(first_raw.copy())
-
+        # raw_audio_history nur nutzen, wenn listen_idx gesetzt ist
+        if self.listen_idx is not None:
+            first_raw = self.raw_audio_history[-1].copy()
+            self.raw_audio_history.clear()
+            for _ in range(self.history_length):
+                self.raw_audio_history.append(first_raw.copy())
 
         obs = self._build_observation()
-        if self.num_envs == 1 and self.scene.show_viewer:
+        if self.num_envs == 1 and self.vis:
             self._plot_stacked(obs[0, 0])
-        return obs
 
+        dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        return obs, dones
 
     def step(self, actions: torch.Tensor):
+        if self.completed:
+            dones = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            return None, None, dones
+
         # Move end-effector by fixed deltas
         deltas = torch.tensor([
             [0.05, 0, 0], [-0.05, 0, 0], [0, 0.05, 0],
@@ -266,8 +290,7 @@ class ReachCubeEgoAudioStackedEnv:
 
         # Build observation
         obs = self._build_observation()
-        if self.num_envs == 1 and self.step_count % self.show_every == 0 and self.scene.show_viewer:
-
+        if self.num_envs == 1 and self.step_count % self.show_every == 0 and self.vis:
             self._plot_stacked(obs[0, 0])
 
         # Simplified exponential reward function
@@ -281,13 +304,10 @@ class ReachCubeEgoAudioStackedEnv:
         # Update trackers to keep compatibility with existing curriculum logging
         self.episode_reward += rewards.mean().item()
 
-
         # Dones logic: keep as zeros since no success threshold is used
         dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        
+
         return obs, rewards, dones
-
-
 
     def _plot_stacked(self, data: torch.Tensor):
         """
@@ -303,25 +323,30 @@ class ReachCubeEgoAudioStackedEnv:
         plt.pause(0.01)
         self._fig.canvas.flush_events()
 
-    def _sample_cube_pos(self) -> np.ndarray:
+    def _sample_cube_pos_shared(self) -> np.ndarray:
+        """
+        Sample a single cube position, then duplicate it for all environments.
+        """
         idx = min(self.x_stage, self.max_stages - 1)
         lower = self.x_bounds[idx]
-        x = np.random.uniform(lower, self.fixed_x, (self.num_envs, 1))
-        y = np.random.uniform(-0.6, 0.6, (self.num_envs, 1))
-        z = np.random.uniform(0.1, 1.0, (self.num_envs, 1))
-        return np.concatenate([x, y, z], axis=1)
+        x = np.random.uniform(lower, self.fixed_x)
+        y = np.random.uniform(-0.6, 0.6)
+        z = np.random.uniform(0.1, 1.0)
+        single_pos = np.array([[x, y, z]])
+        return np.repeat(single_pos, self.num_envs, axis=0)
 
     def _process_episode_end(self):
-        print(f"[Episode {self.episode_count}] Total: {self.episode_reward:.4f}")
+        # Only process rewards if at least one episode has completed
+        if self.episode_count >= 1:
+            print(f"[Episode {self.episode_count}] Total: {self.episode_reward:.4f}")
 
-
-        self.last_rewards.append(self.episode_reward)
-        if len(self.last_rewards) == self.window_size:
-            mean_r = sum(self.last_rewards) / self.window_size
-            thr = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds) - 1)]
-            print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thr:.4f}")
-            if mean_r > thr:
-                self._advance_stage()
+            self.last_rewards.append(self.episode_reward)
+            if len(self.last_rewards) == self.window_size:
+                mean_r = sum(self.last_rewards) / self.window_size
+                thr = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds) - 1)]
+                print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thr:.4f}")
+                if mean_r > thr:
+                    self._advance_stage()
 
     def _advance_stage(self):
         self.x_stage += 1
@@ -332,10 +357,6 @@ class ReachCubeEgoAudioStackedEnv:
         else:
             self.completed = True
             print("Curriculum complete!")
-
-
-
-
 
 
 if __name__ == "__main__":

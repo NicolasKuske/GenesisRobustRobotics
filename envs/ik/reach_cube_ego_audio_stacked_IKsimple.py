@@ -26,15 +26,15 @@ class ReachCubeEgoAudioStackedEnv:
             vis: bool,
             device: torch.device,
             num_envs: int = 1,
-            listen_idx= None, #: int = 0,
+            listen_idx: int = 0, #None
             show_every: int = 10,
-            episodes_per_position: int = 2,
+            episodes_per_position: int = 10,
             history_length: int = 25,
             reward_thresholds=None,
             window_size: int = 9,
             sample_offsets=None,
             noise_config: dict = None,
-            initial_cube_pos=None, #[-0.9, 0.6, 0.7],
+            initial_cube_pos=[0.8, -0.8, 0.2],#None
 
     ):
         self.initial_cube_pos = initial_cube_pos
