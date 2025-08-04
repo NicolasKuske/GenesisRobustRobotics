@@ -207,7 +207,7 @@ class ReachCubeEgoAudioStackedEnv:
         # Decide new cube position
         if self.episode_count == 1:
 
-            one_pos = np.array([[0.2, 0.8, 0.2]]).reshape(1, 3)   #default_position
+            one_pos = np.array([[0.2, -0.8, 0.2]]).reshape(1, 3)   #default_position
             #one_pos = np.array([[-0.9, 0.6, 0.7]]).reshape(1, 3)   #default_position
        	    #one_pos = np.array([[-0.5, 0.3, 0.7]]).reshape(1, 3)  #new_position1
             #one_pos = np.array([[0.1, 0.5, 0.3]]).reshape(1, 3)   #new_position2
