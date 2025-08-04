@@ -1,7 +1,7 @@
 # runners/ik/run_ppo_audio_IKsimple.py
 
 import os
-#os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
+os.environ['PYOPENGL_PLATFORM'] = 'egl'  # comment out for Windows or MacOS
 
 import sys
 from pathlib import Path
