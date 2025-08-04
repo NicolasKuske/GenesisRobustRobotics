@@ -26,7 +26,7 @@ class ReachCubeEgoAudioStackedEnv:
             vis: bool,
             device: torch.device,
             num_envs: int = 1,
-            listen_idx: int = 0,
+            listen_idx= None, #: int = 0,
             show_every: int = 10,
             episodes_per_position: int = 2,
             history_length: int = 25,
@@ -42,7 +42,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.num_envs = num_envs
         self.listen_idx = listen_idx
         self.show_every = show_every
-        self.vis = vis  # <-- Add this line
+        self.vis = vis
 
         self.history_length = history_length
         self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
