@@ -89,7 +89,7 @@ def run(env, agent, args, writer):
 
         agent.train(states, actions, rewards, dones)
 
-        if episode > 0 and episode % 3 == 0:
+        if episode % 3 == 0:
             agent.save_checkpoint()
             print(f"\n Saved checkpoint to logs :)\n ")
 
