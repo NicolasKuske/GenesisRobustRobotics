@@ -26,7 +26,7 @@ class ReachCubeEgoAudioStackedEnv:
             vis: bool,
             device: torch.device,
             num_envs: int = 1,
-            listen_idx: int = 0,
+            listen_idx=None, #int = 0,
             show_every: int = 10,
             episodes_per_position: int = 2,
             history_length: int = 25,
