@@ -274,7 +274,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.audio_history.append(new_slice)
 
         # Play the full stacked audio window at intervals
-        if self.listen_idx is not None and (self.step_count % self.show_every == 0):
+        if self.num_envs == 1 and (self.step_count % self.show_every == 0):
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
             sd.play(full_buffer, 22050)
