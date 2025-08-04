@@ -26,7 +26,7 @@ class ReachCubeEgoAudioStackedEnv:
             vis: bool,
             device: torch.device,
             num_envs: int = 1,
-            listen_idx=None, #int = 0,
+            listen_idx: int = 0,
             show_every: int = 10,
             episodes_per_position: int = 2,
             history_length: int = 25,
@@ -241,12 +241,15 @@ class ReachCubeEgoAudioStackedEnv:
         self.episode_reward = 0.0
 
         first_spec = self._collect_spectrograms(play_audio=False)
-        first_raw = self.raw_audio_history[-1].copy()
         self.audio_history.clear()
-        self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
-            self.raw_audio_history.append(first_raw.copy())
+        # raw_audio_history nur nutzen, wenn listen_idx gesetzt ist
+        if self.listen_idx is not None:
+            first_raw = self.raw_audio_history[-1].copy()
+            self.raw_audio_history.clear()
+            for _ in range(self.history_length):
+                self.raw_audio_history.append(first_raw.copy())
 
         obs = self._build_observation()
         if self.num_envs == 1 and self.vis:
