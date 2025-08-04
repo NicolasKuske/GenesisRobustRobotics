@@ -28,7 +28,7 @@ class ReachCubeEgoAudioStackedEnv:
         num_envs: int = 1,
         listen_idx: int = 0,
         show_every: int = 10,
-        randomize_every: int = 100,
+        randomize_every: int = 2,
         history_length: int = 25,
         sample_offsets=None,
         noise_config: dict = None,  # <-- ADD THIS
@@ -200,50 +200,53 @@ class ReachCubeEgoAudioStackedEnv:
 
     def reset(self) -> torch.Tensor:
         """
-        Reset the envs: randomize the cube, re-init the robot, clear history,
-        populate with the first slice, and return the initial stacked obs.
+        Reset the envs: alternate cube position between two fixed points every `randomize_every` episodes,
+        re-init the robot, clear history, populate with the first slice, and return the initial stacked obs.
         """
         self.episode_count += 1
-        # Decide new cube position
-        if self.episode_count == 1:
 
-            one_pos = np.array([[0.2, 0.8, 0.2]]).reshape(1, 3)   #default_position
-            #one_pos = np.array([[-0.9, 0.6, 0.7]]).reshape(1, 3)   #default_position
-       	    #one_pos = np.array([[-0.5, 0.3, 0.7]]).reshape(1, 3)  #new_position1
-            #one_pos = np.array([[0.1, 0.5, 0.3]]).reshape(1, 3)   #new_position2
+        # Alternate between two predefined cube positions
+        if self.episode_count == 1:
+            # Start at the first position
+            one_pos = np.array([[0.2, -0.8, 0.2]])
         elif self.episode_count % self.randomize_every == 0:
-            xy = np.random.uniform(0.2, 1.0, size=(1, 2)) * np.random.choice([-1, 1], size=(1, 2))
-            z = np.random.uniform(0.1, 1.0, size=(1, 1))
-            one_pos = np.concatenate([xy, z], axis=1)
+            # Determine which of the two to use based on how many times we've randomized so far
+            cycle = (self.episode_count // self.randomize_every)
+            if cycle % 2 == 1:
+                # On the 1st, 3rd, 5th... randomization, use the second position
+                one_pos = np.array([[0.2,  0.8, 0.2]])
+            else:
+                # On the 2nd, 4th, 6th... randomization, use the first position
+                one_pos = np.array([[0.2, -0.8, 0.2]])
         else:
+            # Keep the cube at its current position
             one_pos = self.current_cube_pos[:1]
 
+        # Apply across all envs
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # Reset histories
+        # Reset audio histories
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
-        # Collect the first slice (fills raw_audio_history once)
+        # Collect the first slice
         first_spec = self._collect_spectrograms(play_audio=False)
-        # Extract that first raw audio snippet
         first_raw = self.raw_audio_history[-1].copy()
 
-        # Populate full history with clones
+        # Populate full history
         self.audio_history.clear()
         self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        # Build and optionally plot initial obs
+        # Build and optionally plot initial observation
         obs = self._build_observation()
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
-        # initial “done” flags: none of the envs is done at reset
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, done_array
