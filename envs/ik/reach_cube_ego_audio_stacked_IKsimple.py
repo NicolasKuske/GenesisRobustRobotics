@@ -21,8 +21,9 @@ class ReachCubeEgoAudioStackedEnv:
     Optionally plays back the full stacked audio window for the designated listener index.
 
     The cube alternates between two fixed positions: [0.2, -0.8, 0.2] (easy) and [0.2, 0.8, 0.2] (hard).
-    It stays at the easy position for `easy_episodes` episodes, then at the hard position for
-    `easy_episodes * hard_multiplier` episodes, repeating this cycle indefinitely.
+    It stays at the hard position for `hard_episodes` episodes, then at the easy position for
+    `easy_episodes` episodes, repeating this cycle indefinitely. This ensures the very first
+    episode starts with the hard position.
     """
 
     def __init__(
@@ -33,7 +34,7 @@ class ReachCubeEgoAudioStackedEnv:
         listen_idx: int = 0,
         show_every: int = 10,
         easy_episodes: int = 3,
-        hard_multiplier: int = 2,
+        hard_episodes: int = 5,
         history_length: int = 25,
         sample_offsets=None,
         noise_config: dict = None,
@@ -43,13 +44,11 @@ class ReachCubeEgoAudioStackedEnv:
         self.num_envs = num_envs
         self.listen_idx = listen_idx
         self.show_every = show_every
-        # Number of episodes in the easy segment
+        # Number of episodes in easy and hard segments
         self.easy_episodes = easy_episodes
-        # Factor for how many times longer the hard segment is
-        self.hard_multiplier = hard_multiplier
-        # Compute hard segment length and full cycle length
-        self.hard_episodes = self.easy_episodes * self.hard_multiplier
-        self.cycle_length = self.easy_episodes + self.hard_episodes
+        self.hard_episodes = hard_episodes
+        # Compute full cycle length
+        self.cycle_length = self.hard_episodes + self.easy_episodes
 
         # History for spectrograms and raw audio
         self.history_length = history_length
@@ -77,6 +76,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.step_count = 0
         self.episode_count = 0
         self.current_cube_pos = None
+
 
     def _build_scene(self, show_viewer: bool):
         """Set up the Genesis scene, ground plane, robot, and cube."""
@@ -211,21 +211,21 @@ class ReachCubeEgoAudioStackedEnv:
 
     def reset(self) -> torch.Tensor:
         """
-        Reset the envs: reposition the cube according to the easy/hard schedule,
+        Reset the envs: reposition the cube according to the hard/easy schedule,
         re-init the robot, clear history, populate with the first slice,
         and return the initial stacked obs.
 
-        Easy for `easy_episodes`, then hard for `easy_episodes * hard_multiplier`, repeating.
+        Hard for `hard_episodes`, then easy for `easy_episodes`, repeating.
         """
         self.episode_count += 1
         # Determine position in cycle (0-indexed)
         idx = (self.episode_count - 1) % self.cycle_length
-        if idx < self.easy_episodes:
-            # Easy segment
-            one_pos = np.array([[0.2, -0.8, 0.2]])
+        if idx < self.hard_episodes:
+            # Hard segment first
+            one_pos = np.array([[0.2,  0.8, 0.2]])  # hard
         else:
-            # Hard segment
-            one_pos = np.array([[0.2,  0.8, 0.2]])
+            # Easy segment
+            one_pos = np.array([[0.2, -0.8, 0.2]])  # easy
 
         # Broadcast across all envs
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
@@ -258,6 +258,7 @@ class ReachCubeEgoAudioStackedEnv:
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, done_array
+
 
     def step(self, actions: torch.Tensor):
         """
