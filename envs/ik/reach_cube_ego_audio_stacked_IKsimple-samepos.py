@@ -33,6 +33,8 @@ class ReachCubeEgoAudioStackedEnv:
         num_envs: int = 1,
         listen_idx: int = 0,
         show_every: int = 10,
+        easy_episodes: int = 1,
+        hard_episodes: int = 1,
         history_length: int = 25,
         sample_offsets=None,
         noise_config: dict = None,
@@ -43,14 +45,10 @@ class ReachCubeEgoAudioStackedEnv:
         self.listen_idx = listen_idx
         self.show_every = show_every
         # Number of episodes in easy and hard segments
-        # New cube positions and durations
-        self.cube_positions = [
-            np.array([0.8, 0.0, 0.2]),  # pos A
-            np.array([0.5, -0.3, 0.2]),  # pos B
-            np.array([0.2, -0.8, 0.2])  # pos C
-        ]
-        self.cube_durations = [1, 1, 1]  # Number of episodes each position lasts
-        self.cube_cycle_length = sum(self.cube_durations)
+        self.easy_episodes = easy_episodes
+        self.hard_episodes = hard_episodes
+        # Compute full cycle length
+        self.cycle_length = self.hard_episodes + self.easy_episodes
 
         # History for spectrograms and raw audio
         self.history_length = history_length
@@ -220,14 +218,16 @@ class ReachCubeEgoAudioStackedEnv:
         Hard for `hard_episodes`, then easy for `easy_episodes`, repeating.
         """
         self.episode_count += 1
-        # Determine which cube position to use based on current episode
-        idx = (self.episode_count - 1) % self.cube_cycle_length
-        cumulative = 0
-        for i, duration in enumerate(self.cube_durations):
-            cumulative += duration
-            if idx < cumulative:
-                one_pos = self.cube_positions[i].reshape(1, -1)
-                break
+        # Determine position in cycle (0-indexed)
+        idx = (self.episode_count - 1) % self.cycle_length
+        if idx < self.hard_episodes:
+            # Hard segment first
+            #one_pos = np.array([[0.2,  0.8, 0.2]])  # hard
+            #one_pos = np.array([[0.8,  0.0, 0.2]])  # hard
+            one_pos = np.array([[0.5,  -0.3, 0.2]])  # hard
+        else:
+            # Easy segment
+            one_pos = np.array([[0.2, -0.8, 0.2]])  # easy
 
         # Broadcast across all envs
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
