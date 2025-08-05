@@ -223,7 +223,8 @@ class ReachCubeEgoAudioStackedEnv:
         if idx < self.hard_episodes:
             # Hard segment first
             #one_pos = np.array([[0.2,  0.8, 0.2]])  # hard
-            one_pos = np.array([[0.8,  0.0, 0.2]])  # hard
+            #one_pos = np.array([[0.8,  0.0, 0.2]])  # hard
+            one_pos = np.array([[0.5,  -0.3, 0.2]])  # hard
         else:
             # Easy segment
             one_pos = np.array([[0.2, -0.8, 0.2]])  # easy
