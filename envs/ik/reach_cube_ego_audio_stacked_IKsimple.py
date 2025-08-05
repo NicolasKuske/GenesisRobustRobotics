@@ -233,6 +233,9 @@ class ReachCubeEgoAudioStackedEnv:
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
+        # Print current cube position
+        print(f"Episode {self.episode_count}: current cube position = {self.current_cube_pos[0]}")
+
         # Reset histories
         self.audio_history.clear()
         self.raw_audio_history.clear()
