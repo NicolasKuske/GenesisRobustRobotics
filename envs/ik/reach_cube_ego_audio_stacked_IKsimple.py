@@ -33,8 +33,8 @@ class ReachCubeEgoAudioStackedEnv:
         num_envs: int = 1,
         listen_idx: int = 0,
         show_every: int = 10,
-        easy_episodes: int = 3,
-        hard_episodes: int = 5,
+        easy_episodes: int = 1,
+        hard_episodes: int = 1,
         history_length: int = 25,
         sample_offsets=None,
         noise_config: dict = None,
@@ -222,7 +222,9 @@ class ReachCubeEgoAudioStackedEnv:
         idx = (self.episode_count - 1) % self.cycle_length
         if idx < self.hard_episodes:
             # Hard segment first
-            one_pos = np.array([[0.2,  0.8, 0.2]])  # hard
+            #one_pos = np.array([[0.2,  0.8, 0.2]])  # hard
+            #one_pos = np.array([[0.8,  0.0, 0.2]])  # hard
+            one_pos = np.array([[0.5,  -0.3, 0.2]])  # hard
         else:
             # Easy segment
             one_pos = np.array([[0.2, -0.8, 0.2]])  # easy
