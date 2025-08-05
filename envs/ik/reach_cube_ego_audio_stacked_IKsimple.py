@@ -45,11 +45,14 @@ class ReachCubeEgoAudioStackedEnv:
         # Number of episodes in easy and hard segments
         # New cube positions and durations
         self.cube_positions = [
-            np.array([0.8, 0.0, 0.2]),  # pos A
             np.array([0.5, -0.3, 0.2]),  # pos B
+
+            np.array([0.8, 0.0, 0.2]),  # pos A
+
+            np.array([0.4, -0.5, 0.2]),  # pos A
             np.array([0.2, -0.8, 0.2])  # pos C
         ]
-        self.cube_durations = [1, 1, 1]  # Number of episodes each position lasts
+        self.cube_durations = [1, 1, 1,1]  # Number of episodes each position lasts
         self.cube_cycle_length = sum(self.cube_durations)
 
         # History for spectrograms and raw audio
