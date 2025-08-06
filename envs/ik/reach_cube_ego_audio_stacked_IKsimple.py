@@ -201,7 +201,7 @@ class ReachCubeEgoAudioStackedEnv:
             # Compute spectrogram slice
             S_db = self._compute_spectrogram(audio)
             # Optional immediate playback of just this slice
-            if play_audio and i == self.listen_idx:
+            if play_audio and self.num_envs==1:
                 sd.play(audio, 22050)
                 sd.wait()
 
