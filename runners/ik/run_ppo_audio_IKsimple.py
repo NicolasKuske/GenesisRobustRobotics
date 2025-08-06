@@ -65,7 +65,7 @@ def run(env, agent, args, writer):
 
         states, actions, rewards, dones = [], [], [], []
 
-        for step in range(100):
+        for step in range(200):
             action = agent.select_action(state)
             next_state, reward, done = env.step(action)
 
