@@ -65,7 +65,7 @@ def run(env, agent, args, writer):
 
         audio_states, joint_states, actions, rewards, dones = [], [], [], [], []
 
-        for step in range(200):
+        for step in range(100):
             action = agent.select_action(audio_state, joint_state)
             next_audio_state, next_joint_state, reward, done = env.step(action)
 
