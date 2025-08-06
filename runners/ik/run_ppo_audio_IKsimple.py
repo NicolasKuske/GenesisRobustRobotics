@@ -38,6 +38,7 @@ def train_ppo(args):
 
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
+        joint_dim=7,  # <-- This fixes your error
         action_shape=env.action_space,
         lr=1e-3,
         gamma=0.99,
