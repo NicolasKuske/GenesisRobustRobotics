@@ -262,7 +262,9 @@ class ReachCubeEgoAudioStackedEnv:
         stacked_joints = torch.stack(list(self.joint_history), dim=1).reshape(self.num_envs, -1)
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        return obs, stacked_joints, done_array
+        #return obs, stacked_joints, done_array
+
+        return obs, done_array
 
     def step(self, actions: torch.Tensor):
         deltas = torch.tensor([
@@ -308,7 +310,9 @@ class ReachCubeEgoAudioStackedEnv:
         self.joint_history.append(joints)
 
         stacked_joints = torch.stack(list(self.joint_history), dim=1).reshape(self.num_envs, -1)
-        return obs, stacked_joints, rewards, dones
+        #return obs, stacked_joints, rewards, dones
+
+        return obs, rewards, dones
 
         #selected_joints = torch.cat([self.joint_history[offset] for offset in self.sample_offsets], dim=1)
         #return obs, selected_joints, rewards, dones
