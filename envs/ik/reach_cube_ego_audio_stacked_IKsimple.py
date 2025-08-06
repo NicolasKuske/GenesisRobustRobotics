@@ -259,10 +259,11 @@ class ReachCubeEgoAudioStackedEnv:
         for _ in range(self.history_length):
             self.joint_history.append(joints.clone())
 
-        selected_joints = torch.cat([self.joint_history[offset] for offset in self.sample_offsets], dim=1)
+        #selected_joints = torch.cat([self.joint_history[offset] for offset in self.sample_offsets], dim=1)
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        return obs, selected_joints, done_array
+        #return obs, selected_joints, done_array
 
+        return obs, torch.stack(list(self.joint_history), dim=1), done_array
 
     def step(self, actions: torch.Tensor):
         deltas = torch.tensor([
@@ -312,12 +313,19 @@ class ReachCubeEgoAudioStackedEnv:
 
         dones = success.bool()
 
+        # existing step() logic above this remains the same
+
         joints = self.franka.get_qpos()[:, :7].clone()
         self.joint_history.append(joints)
 
-        selected_joints = torch.cat([self.joint_history[offset] for offset in self.sample_offsets], dim=1)
+        stacked_joints = torch.stack(list(self.joint_history), dim=1)
 
-        return obs, selected_joints, rewards, dones
+        #selected_joints = torch.cat([self.joint_history[offset] for offset in self.sample_offsets], dim=1)
+        #return obs, selected_joints, rewards, dones
+
+        return obs, stacked_joints, rewards, dones
+
+
 
     def _plot_stacked(self, data: torch.Tensor):
         """
