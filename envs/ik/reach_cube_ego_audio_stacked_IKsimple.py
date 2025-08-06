@@ -51,6 +51,8 @@ class ReachCubeEgoAudioStackedEnv:
         self.raw_audio_history = deque(maxlen=self.history_length)
         self.noise_config = noise_config if noise_config else {"audio_noise_level": 0.0}
 
+        self.joint_history = deque(maxlen=self.history_length)
+
         self.freq_bins = 257
         self.time_bins = len(self.sample_offsets)
         self.obs_shape = (1, self.freq_bins, self.time_bins)
@@ -250,12 +252,16 @@ class ReachCubeEgoAudioStackedEnv:
         self.prev_dist = torch.norm((left + right) / 2 - cube, dim=1)
 
         obs = self._build_observation()
-        joints = self.franka.get_qpos()[:, :7].clone()  # <-- Get robot joint angles
+        joints = self.franka.get_qpos()[:, :7].clone()
+        self.joint_history.clear()
+        for _ in range(self.history_length):
+            self.joint_history.append(joints.clone())
+
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        return obs, joints, done_array  # <-- return joints too
+        return obs, torch.stack(list(self.joint_history), dim=1), done_array
 
     def step(self, actions: torch.Tensor):
         deltas = torch.tensor([
@@ -282,7 +288,6 @@ class ReachCubeEgoAudioStackedEnv:
             sd.wait()
 
         obs = self._build_observation()
-        joints = self.franka.get_qpos()[:, :7].clone()  # <-- Get robot joint angles
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
 
@@ -306,7 +311,14 @@ class ReachCubeEgoAudioStackedEnv:
 
         dones = success.bool()
 
-        return obs, joints, rewards, dones  # <-- return joints too
+        # existing step() logic above this remains the same
+
+        joints = self.franka.get_qpos()[:, :7].clone()
+        self.joint_history.append(joints)
+
+        stacked_joints = torch.stack(list(self.joint_history), dim=1)
+
+        return obs, stacked_joints, rewards, dones
 
     def _plot_stacked(self, data: torch.Tensor):
         """
