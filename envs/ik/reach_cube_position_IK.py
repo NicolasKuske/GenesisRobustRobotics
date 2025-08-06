@@ -15,7 +15,8 @@ class ReachCubePositionCurrEnv:
         num_envs=1,
         episodes_per_position=3,
         window_size=4,
-        reward_thresholds=[2, 2.5, 3, 3, 3.5, 3.5, 3.5]
+        #reward_thresholds=[2, 2.5, 3, 3, 3.5, 3.5, 3.5]
+        reward_thresholds = [4, 5, 6, 6, 6, 6, 6]
     ):
         self.device = device
         self.num_envs = num_envs
