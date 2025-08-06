@@ -60,9 +60,6 @@ def run(env, agent, args, writer):
 
     for episode in range(num_episodes):
         state, done_array = env.reset()
-        if done_array.all():
-            print("\n[INFO] Curriculum complete, ending training.\n")
-            break
 
         total_reward = torch.zeros(env.num_envs).to(args.device)
 
