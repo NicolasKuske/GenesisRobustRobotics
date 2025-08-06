@@ -38,7 +38,7 @@ def train_ppo(args):
 
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
-        joint_dim=7 * env.history_length,  
+        joint_dim=7 * env.history_length,
         #joint_dim=7 * len(env.sample_offsets),
         action_shape=env.action_space,
         lr=1e-3,

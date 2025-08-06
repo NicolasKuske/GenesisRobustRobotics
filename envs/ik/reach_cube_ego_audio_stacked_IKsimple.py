@@ -259,12 +259,10 @@ class ReachCubeEgoAudioStackedEnv:
         for _ in range(self.history_length):
             self.joint_history.append(joints.clone())
 
-        #selected_joints = torch.cat([self.joint_history[offset] for offset in self.sample_offsets], dim=1)
+        stacked_joints = torch.stack(list(self.joint_history), dim=1).reshape(self.num_envs, -1)
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        #return obs, selected_joints, done_array
-
-        return obs, torch.stack(list(self.joint_history), dim=1), done_array
+        return obs, stacked_joints, done_array
 
     def step(self, actions: torch.Tensor):
         deltas = torch.tensor([
@@ -284,15 +282,7 @@ class ReachCubeEgoAudioStackedEnv:
         new_slice = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(new_slice)
 
-        if self.num_envs == 1 and (self.step_count % self.show_every == 0):
-            snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
-            full_buffer = np.concatenate(snippets, axis=0)
-            sd.play(full_buffer, 22050)
-            sd.wait()
-
         obs = self._build_observation()
-        if self.num_envs == 1 and self.step_count % self.show_every == 0:
-            self._plot_stacked(obs[0, 0])
 
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
@@ -314,13 +304,12 @@ class ReachCubeEgoAudioStackedEnv:
 
         dones = success.bool()
 
-        # existing step() logic above this remains the same
-
         joints = self.franka.get_qpos()[:, :7].clone()
         self.joint_history.append(joints)
 
-        stacked_joints = torch.stack(list(self.joint_history), dim=1)
+        stacked_joints = torch.stack(list(self.joint_history), dim=1).reshape(self.num_envs, -1)
         return obs, stacked_joints, rewards, dones
+
         #selected_joints = torch.cat([self.joint_history[offset] for offset in self.sample_offsets], dim=1)
         #return obs, selected_joints, rewards, dones
 
