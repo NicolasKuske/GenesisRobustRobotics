@@ -34,8 +34,7 @@ class ReachCubeEgoAudioStackedEnv:
         listen_idx: int = 0,
         show_every: int = 10,
         easy_episodes: int = 1,
-        hard_episodes: int = 4,
-        stickiness: int = 2,
+        hard_episodes: int = 1,
         history_length: int = 25,
         sample_offsets=None,
         noise_config: dict = None,
@@ -46,14 +45,10 @@ class ReachCubeEgoAudioStackedEnv:
         self.listen_idx = listen_idx
         self.show_every = show_every
         # Number of episodes in easy and hard segments
-        self.stickiness = stickiness
         self.easy_episodes = easy_episodes
         self.hard_episodes = hard_episodes
         # Compute full cycle length
         self.cycle_length = self.hard_episodes + self.easy_episodes
-        # Initialize per-env counters and positions
-        self.env_sticky_counter = np.zeros(self.num_envs, dtype=int)
-        self.env_cube_positions = np.zeros((self.num_envs, 3), dtype=np.float32)
 
         # History for spectrograms and raw audio
         self.history_length = history_length
@@ -214,58 +209,57 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
-    def reset(self):
+    def reset(self) -> torch.Tensor:
+        """
+        Reset the envs: reposition the cube according to the hard/easy schedule,
+        re-init the robot, clear history, populate with the first slice,
+        and return the initial stacked obs.
+
+        Hard for `hard_episodes`, then easy for `easy_episodes`, repeating.
+        """
         self.episode_count += 1
+        # Determine position in cycle (0-indexed)
+        idx = (self.episode_count - 1) % self.cycle_length
+        if idx < self.hard_episodes:
+            # Hard segment first
+            #one_pos = np.array([[0.2,  0.8, 0.2]])  # hard
+            #one_pos = np.array([[0.8,  0.0, 0.2]])  # hard
+            one_pos = np.array([[0.5,  -0.3, 0.2]])  # hard
+        else:
+            # Easy segment
+            one_pos = np.array([[0.2, -0.8, 0.2]])  # easy
 
-        # Probability for hard position
-        hard_prob = self.hard_episodes / (self.hard_episodes + self.easy_episodes)
-        easy_pos = np.array([0.2, -0.8, 0.2])
-        hard_pos = np.array([0.2, 0.8, 0.2])
-
-        for i in range(self.num_envs):
-            if self.env_sticky_counter[i] == 0:
-                # Resample cube position for this env
-                if np.random.rand() < hard_prob:
-                    self.env_cube_positions[i] = hard_pos
-                else:
-                    self.env_cube_positions[i] = easy_pos
-
-                # Reset stickiness counter
-                self.env_sticky_counter[i] = self.stickiness
-            else:
-                # Decrease stickiness counter
-                self.env_sticky_counter[i] -= 1
-
-        # Set cube positions per environment
+        # Broadcast across all envs
+        self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
         self._init_robot()
-        self.cube.set_pos(self.env_cube_positions, envs_idx=self.envs_idx)
+        self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # Print current cube positions for first env as debug
-        print(f"Episode {self.episode_count}: cube position env[0] = {self.env_cube_positions[0]}")
+        # Print current cube position
+        print(f"Episode {self.episode_count}: current cube position = {self.current_cube_pos[0]}")
 
         # Reset histories
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
-        # Collect initial audio slice
+        # Collect the first slice
         first_spec = self._collect_spectrograms(play_audio=False)
         first_raw = self.raw_audio_history[-1].copy()
 
-        # Populate history
+        # Populate full history
         self.audio_history.clear()
         self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        # Build initial observation
+        # Build and optionally plot initial observation
         obs = self._build_observation()
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
         return obs, done_array
+
 
     def step(self, actions: torch.Tensor):
         """
@@ -320,10 +314,14 @@ class ReachCubeEgoAudioStackedEnv:
         """
         plt.clf()
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]
-        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=-40, vmax=100)
+
+        # Explicit normalization [0, 1] scaled back to dB for visualization
+        vmin, vmax = 0, 1
+        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=vmin, vmax=vmax, cmap='magma')
+        plt.colorbar(label='Amplitude (dB)')
         plt.xlabel('Time (ms)')
         plt.ylabel('Frequency (kHz)')
-        plt.title(f'Step {self.step_count} Stacked Spec')
+        plt.title(f'Step {self.step_count} Stacked Spectrogram')
         plt.draw()
         plt.pause(0.01)
         self._fig.canvas.flush_events()

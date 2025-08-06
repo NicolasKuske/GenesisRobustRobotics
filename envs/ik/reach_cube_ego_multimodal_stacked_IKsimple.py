@@ -144,7 +144,7 @@ class ReachCubeEgoMultimodalStackedEnv:
     def _init_robot(self):
         # Neutral joint positions
         q0 = torch.tensor(
-            [[-1.0, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02]],
+            [[-.2, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02]],
             device=self.device
         ).repeat(self.num_envs, 1)
         self.franka.set_qpos(q0, envs_idx=self.envs_idx)

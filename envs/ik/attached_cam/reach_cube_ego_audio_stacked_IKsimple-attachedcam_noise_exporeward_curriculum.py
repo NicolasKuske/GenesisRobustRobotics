@@ -315,10 +315,14 @@ class ReachCubeEgoAudioStackedEnv:
         """
         plt.clf()
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]
-        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=-40, vmax=100)
+
+        # Explicit normalization [0, 1] scaled back to dB for visualization
+        vmin, vmax = 0, 1
+        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=vmin, vmax=vmax, cmap='magma')
+        plt.colorbar(label='Amplitude (dB)')
         plt.xlabel('Time (ms)')
         plt.ylabel('Frequency (kHz)')
-        plt.title(f'Step {self.step_count} Stacked Spec')
+        plt.title(f'Step {self.step_count} Stacked Spectrogram')
         plt.draw()
         plt.pause(0.01)
         self._fig.canvas.flush_events()

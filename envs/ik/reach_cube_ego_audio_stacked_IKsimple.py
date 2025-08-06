@@ -13,74 +13,80 @@ import sounddevice as sd
 
 class ReachCubeEgoAudioStackedEnv:
     """
-    Genesis environment with audio-only observations and configurable cube repositioning schedule.
+    Genesis environment with audio-only observations and random cube repositioning.
     Observations are stacked spectrogram frames over a short history.
 
     Each step returns an observation tensor of shape (num_envs, 1, F, T),
     where F is the number of frequency bins and T is the number of stacked time frames.
     Optionally plays back the full stacked audio window for the designated listener index.
-
-    The cube alternates between two fixed positions: [0.2, -0.8, 0.2] (easy) and [0.2, 0.8, 0.2] (hard).
-    It stays at the hard position for `hard_episodes` episodes, then at the easy position for
-    `easy_episodes` episodes, repeating this cycle indefinitely. This ensures the very first
-    episode starts with the hard position.
     """
 
     def __init__(
-        self,
-        vis: bool,
-        device: torch.device,
-        num_envs: int = 1,
-        listen_idx: int = 0,
-        show_every: int = 10,
-        easy_episodes: int = 1,
-        hard_episodes: int = 4,
-        stickiness: int = 2,
-        history_length: int = 25,
-        sample_offsets=None,
-        noise_config: dict = None,
+            self,
+            vis: bool,
+            device: torch.device,
+            num_envs: int = 1,
+            listen_idx: int = 0,
+            show_every: int = 10,
+            episodes_per_position: int = 3,
+            history_length: int = 25,
+            reward_thresholds=None,
+            window_size: int = 4,
+            success_thresh: float = 0.30,
+            success_bonus: float = 0.1,
+            shaping_coef: float = 10.0,
+            k: float = 0.5,
+            dist_offset: float = 0.0,
+            sample_offsets=None,
+            noise_config: dict = None,
     ):
-        # --- Configuration ---
         self.device = device
         self.num_envs = num_envs
         self.listen_idx = listen_idx
         self.show_every = show_every
-        # Number of episodes in easy and hard segments
-        self.stickiness = stickiness
-        self.easy_episodes = easy_episodes
-        self.hard_episodes = hard_episodes
-        # Compute full cycle length
-        self.cycle_length = self.hard_episodes + self.easy_episodes
-        # Initialize per-env counters and positions
-        self.env_sticky_counter = np.zeros(self.num_envs, dtype=int)
-        self.env_cube_positions = np.zeros((self.num_envs, 3), dtype=np.float32)
 
-        # History for spectrograms and raw audio
         self.history_length = history_length
         self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
         self.audio_history = deque(maxlen=self.history_length)
         self.raw_audio_history = deque(maxlen=self.history_length)
-
-        # Store noise config
         self.noise_config = noise_config if noise_config else {"audio_noise_level": 0.0}
 
-        # Spectrogram dimensions: freq bins and stacked time frames
         self.freq_bins = 257
         self.time_bins = len(self.sample_offsets)
         self.obs_shape = (1, self.freq_bins, self.time_bins)
         self.action_space = 6
 
-        # Matplotlib figure for live preview
         self._fig = plt.figure("Stacked Spectrogram Preview")
-
-        # Build the simulation scene and initialize the robot
         self._build_scene(vis)
         self._init_robot()
 
-        # Internal counters and state
         self.step_count = 0
         self.episode_count = 0
-        self.current_cube_pos = None
+
+        # Curriculum parameters (exactly from torque script)
+        self.episodes_per_position = episodes_per_position
+        self.window_size = window_size
+        self.reward_thresholds = reward_thresholds or [3, 3, 3, 3, 3.5, 3.5, 3.5]
+        self.last_rewards = deque(maxlen=self.window_size)
+        self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
+        self.fixed_x = 0.6
+        self.max_stages = len(self.x_bounds)
+        self.x_stage = 0
+        self.completed = False
+
+        # Reward shaping
+        self.success_thresh = success_thresh
+        self.success_bonus = success_bonus
+        self.shaping_coef = shaping_coef
+        self.k = k
+        self.dist_offset = dist_offset
+        self.prev_dist = None
+
+        # Episode tracking
+        self.sum_delta = torch.zeros(self.num_envs, device=self.device)
+        self.sum_success = torch.zeros(self.num_envs, device=self.device)
+        self.episode_reward = 0.0
+
 
 
     def _build_scene(self, show_viewer: bool):
@@ -195,7 +201,7 @@ class ReachCubeEgoAudioStackedEnv:
             # Compute spectrogram slice
             S_db = self._compute_spectrogram(audio)
             # Optional immediate playback of just this slice
-            if play_audio and i == self.listen_idx and self.num_envs == 1:
+            if play_audio and i == self.listen_idx:
                 sd.play(audio, 22050)
                 sd.wait()
 
@@ -214,52 +220,35 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
-    def reset(self):
+    def reset(self) -> torch.Tensor:
+        if self.episode_count > 0:
+            self._process_episode_end()
         self.episode_count += 1
 
-        # Probability for hard position
-        hard_prob = self.hard_episodes / (self.hard_episodes + self.easy_episodes)
-        easy_pos = np.array([0.2, -0.8, 0.2])
-        hard_pos = np.array([0.2, 0.8, 0.2])
+        if (self.episode_count - 1) % self.episodes_per_position == 0:
+            self.current_cube_pos = self._sample_cube_pos()
 
-        for i in range(self.num_envs):
-            if self.env_sticky_counter[i] == 0:
-                # Resample cube position for this env
-                if np.random.rand() < hard_prob:
-                    self.env_cube_positions[i] = hard_pos
-                else:
-                    self.env_cube_positions[i] = easy_pos
-
-                # Reset stickiness counter
-                self.env_sticky_counter[i] = self.stickiness
-            else:
-                # Decrease stickiness counter
-                self.env_sticky_counter[i] -= 1
-
-        # Set cube positions per environment
         self._init_robot()
-        self.cube.set_pos(self.env_cube_positions, envs_idx=self.envs_idx)
+        self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # Print current cube positions for first env as debug
-        print(f"Episode {self.episode_count}: cube position env[0] = {self.env_cube_positions[0]}")
+        self.sum_delta.zero_()
+        self.sum_success.zero_()
+        self.episode_reward = 0.0
 
-        # Reset histories
-        self.audio_history.clear()
-        self.raw_audio_history.clear()
-
-        # Collect initial audio slice
         first_spec = self._collect_spectrograms(play_audio=False)
         first_raw = self.raw_audio_history[-1].copy()
-
-        # Populate history
         self.audio_history.clear()
         self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        # Build initial observation
+        left = self.franka.get_link("left_finger").get_pos()
+        right = self.franka.get_link("right_finger").get_pos()
+        cube = self.cube.get_pos()
+        self.prev_dist = torch.norm((left + right) / 2 - cube, dim=1)
+
         obs = self._build_observation()
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
@@ -267,11 +256,8 @@ class ReachCubeEgoAudioStackedEnv:
 
         return obs, done_array
 
+
     def step(self, actions: torch.Tensor):
-        """
-        Apply the discrete action, step the sim, update histories,
-        optionally play the full stacked audio window, and compute rewards.
-        """
         # Move end-effector by fixed deltas
         deltas = torch.tensor([
             [0.05, 0, 0], [-0.05, 0, 0], [0, 0.05, 0],
@@ -288,29 +274,43 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
-        # Collect new slice (no immediate slice playback)
+        # Collect new slice
         new_slice = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(new_slice)
 
-        # Play the full stacked audio window at intervals
-        if self.num_envs == 1 and (self.step_count % self.show_every == 0):
+        # Audio playback periodically
+        if self.listen_idx is not None and (self.step_count % self.show_every == 0):
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
             sd.play(full_buffer, 22050)
             sd.wait()
 
-        # Build observation and optionally visualize
+        # Build observation
         obs = self._build_observation()
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
 
-        # Compute reward based on distance to cube
+        # Reward computation exactly as torque script
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube_pos = self.cube.get_pos()
-        dist = torch.norm((left + right) / 2 - cube_pos, dim=1)
-        rewards = torch.clamp(torch.exp(-4 * (dist)), 0.0, 1.0)
-        dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        dist_new = torch.norm((left + right) / 2 - cube_pos, dim=1)
+
+        delta = self.shaping_coef * (
+                torch.exp(-self.k * (dist_new - self.dist_offset))
+                - torch.exp(-self.k * (self.prev_dist - self.dist_offset))
+        )
+        success = (dist_new < self.success_thresh).float()
+        bonus = success * self.success_bonus
+        rewards = delta + bonus
+
+        # Update trackers exactly as torque script
+        self.sum_delta += delta
+        self.sum_success += bonus
+        self.episode_reward += rewards.mean().item()
+        self.prev_dist = dist_new
+
+        dones = success.bool()
 
         return obs, rewards, dones
 
@@ -320,13 +320,53 @@ class ReachCubeEgoAudioStackedEnv:
         """
         plt.clf()
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]
-        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=-40, vmax=100)
+
+        # Explicit normalization [0, 1] scaled back to dB for visualization
+        vmin, vmax = 0, 1
+        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=vmin, vmax=vmax, cmap='magma')
+        plt.colorbar(label='Amplitude (dB)')
         plt.xlabel('Time (ms)')
         plt.ylabel('Frequency (kHz)')
-        plt.title(f'Step {self.step_count} Stacked Spec')
+        plt.title(f'Step {self.step_count} Stacked Spectrogram')
         plt.draw()
         plt.pause(0.01)
         self._fig.canvas.flush_events()
+
+    def _sample_cube_pos(self) -> np.ndarray:
+        idx = min(self.x_stage, self.max_stages - 1)
+        lower = self.x_bounds[idx]
+        x = np.random.uniform(lower, self.fixed_x, (self.num_envs, 1))
+        y = np.random.uniform(-0.6, 0.6, (self.num_envs, 1))
+        z = np.random.uniform(0.1, 1.0, (self.num_envs, 1))
+        return np.concatenate([x, y, z], axis=1)
+
+    def _process_episode_end(self):
+        shaping = self.sum_delta.mean().item()
+        bonus = self.sum_success.mean().item()
+        total = self.episode_reward
+        print(f"[Episode {self.episode_count}] Shaping: {shaping:.4f}, Bonus: {bonus:.4f}, Total: {total:.4f}")
+
+        self.last_rewards.append(total)
+        if len(self.last_rewards) == self.window_size:
+            mean_r = sum(self.last_rewards) / self.window_size
+            thr = self.reward_thresholds[min(self.x_stage, len(self.reward_thresholds) - 1)]
+            print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thr:.4f}")
+            if mean_r > thr:
+                self._advance_stage()
+
+    def _advance_stage(self):
+        self.x_stage += 1
+        if self.x_stage < self.max_stages:
+            lb = self.x_bounds[self.x_stage]
+            print(f"Advanced to stage {self.x_stage}: X ∈ [{lb:.2f}, {self.fixed_x:.2f}]")
+            self.last_rewards.clear()
+        else:
+            self.completed = True
+            print("Curriculum complete!")
+
+
+
+
 
 
 if __name__ == "__main__":

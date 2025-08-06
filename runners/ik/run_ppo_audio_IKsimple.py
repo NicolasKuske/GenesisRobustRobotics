@@ -39,7 +39,7 @@ def train_ppo(args):
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
         action_shape=env.action_space,
-        lr=1e-5,
+        lr=1e-3,
         gamma=0.99,
         clip_epsilon=0.2,
         device=args.device,
@@ -60,9 +60,6 @@ def run(env, agent, args, writer):
 
     for episode in range(num_episodes):
         state, done_array = env.reset()
-        if done_array.all():
-            print("\n[INFO] Curriculum complete, ending training.\n")
-            break
 
         total_reward = torch.zeros(env.num_envs).to(args.device)
 
@@ -89,7 +86,7 @@ def run(env, agent, args, writer):
 
         agent.train(states, actions, rewards, dones)
 
-        if episode > 0 and episode % 3 == 0:
+        if episode % 3 == 0:
             agent.save_checkpoint()
             print(f"\n Saved checkpoint to logs :)\n ")
 

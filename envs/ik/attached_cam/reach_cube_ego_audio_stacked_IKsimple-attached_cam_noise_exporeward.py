@@ -241,7 +241,8 @@ class ReachCubeEgoAudioStackedEnv:
         obs = self._build_observation()
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
-        return obs
+        done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        return obs, done_array
 
     def step(self, actions: torch.Tensor):
         """
@@ -296,10 +297,14 @@ class ReachCubeEgoAudioStackedEnv:
         """
         plt.clf()
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]
-        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=-40, vmax=100)
+
+        # Explicit normalization [0, 1] scaled back to dB for visualization
+        vmin, vmax = 0, 1
+        plt.imshow(data.cpu().numpy(), origin='lower', aspect='auto', extent=extent, vmin=vmin, vmax=vmax, cmap='magma')
+        plt.colorbar(label='Amplitude (dB)')
         plt.xlabel('Time (ms)')
         plt.ylabel('Frequency (kHz)')
-        plt.title(f'Step {self.step_count} Stacked Spec')
+        plt.title(f'Step {self.step_count} Stacked Spectrogram')
         plt.draw()
         plt.pause(0.01)
         self._fig.canvas.flush_events()
