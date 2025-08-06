@@ -220,7 +220,7 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
-    def reset(self) -> torch.Tensor:
+    def reset(self):
         if self.episode_count > 0:
             self._process_episode_end()
         self.episode_count += 1
@@ -250,15 +250,14 @@ class ReachCubeEgoAudioStackedEnv:
         self.prev_dist = torch.norm((left + right) / 2 - cube, dim=1)
 
         obs = self._build_observation()
+        joints = self.franka.get_qpos()[:, :7].clone()  # <-- Get robot joint angles
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        return obs, done_array
-
+        return obs, joints, done_array  # <-- return joints too
 
     def step(self, actions: torch.Tensor):
-        # Move end-effector by fixed deltas
         deltas = torch.tensor([
             [0.05, 0, 0], [-0.05, 0, 0], [0, 0.05, 0],
             [0, -0.05, 0], [0, 0, 0.05], [0, 0, -0.05]
@@ -266,7 +265,6 @@ class ReachCubeEgoAudioStackedEnv:
         masks = [actions == i for i in range(self.action_space)]
         self.pos += sum(deltas[i] * masks[i].unsqueeze(1) for i in range(self.action_space))
 
-        # IK control
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector, pos=self.pos, quat=self.quat
         )
@@ -274,23 +272,20 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
-        # Collect new slice
         new_slice = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(new_slice)
 
-        # Audio playback periodically
         if self.num_envs == 1 and (self.step_count % self.show_every == 0):
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
             sd.play(full_buffer, 22050)
             sd.wait()
 
-        # Build observation
         obs = self._build_observation()
+        joints = self.franka.get_qpos()[:, :7].clone()  # <-- Get robot joint angles
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
 
-        # Reward computation exactly as torque script
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube_pos = self.cube.get_pos()
@@ -304,7 +299,6 @@ class ReachCubeEgoAudioStackedEnv:
         bonus = success * self.success_bonus
         rewards = delta + bonus
 
-        # Update trackers exactly as torque script
         self.sum_delta += delta
         self.sum_success += bonus
         self.episode_reward += rewards.mean().item()
@@ -312,7 +306,7 @@ class ReachCubeEgoAudioStackedEnv:
 
         dones = success.bool()
 
-        return obs, rewards, dones
+        return obs, joints, rewards, dones  # <-- return joints too
 
     def _plot_stacked(self, data: torch.Tensor):
         """
