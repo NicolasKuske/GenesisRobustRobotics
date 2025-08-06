@@ -34,7 +34,7 @@ class ReachCubeEgoAudioStackedEnv:
         listen_idx: int = 0,
         show_every: int = 10,
         easy_episodes: int = 1,
-        hard_episodes: int = 5,
+        hard_episodes: int = 4,
         stickiness: int = 2,
         history_length: int = 25,
         sample_offsets=None,
