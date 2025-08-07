@@ -69,7 +69,9 @@ You can run different learning algorithms with the following command structure. 
 ```bash
 python runners/ik/run_ppo_position_IKsimple.py -n 10
 ```
-Exchange 'position' with 'vision' for vision based RL, or use 'multimodal' for vision-audio based multimodal RL (spectrogram and visual frames are only shown for single enviroments `-n 1`). 
+Exchange 'position' with 'vision' for vision based RL, or use 'multimodal' for vision-audio based multimodal RL. 
+
+&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;(Spectrogram and visual frames appear automatically for single enviroments `-n 1`). 
 
 
 <img  src="figs/train.gif" width="250">      &nbsp;&nbsp;&nbsp;&nbsp;   <img  src="figs/multimodal.png" width="650"> 
