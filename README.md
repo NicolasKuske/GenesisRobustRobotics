@@ -49,13 +49,13 @@ python runners/ik/run_ppo_multimodal_IKsimple.py -v -n 1 {-d cpu}
 (Runs on GPU without flag: -d cpu)
 
 #### Possible issue solutions
-In case of issue with igl expected parameter mismatch: 
+- In case of issue with igl expected parameter mismatch: 
 ```
 cp {/your workspace}/GenesisRobustRobotics/rigid_geom.py {/usr/local/lib/python3.11/dist-packages}/genesis/engine/entities/rigid_entity/rigid_geom.py
 ```
 adapt to your workspace and Genesis installation directory.
 
-If not on Ubuntu or in case of issue with graphical backend, comment out first line in runner scripts:
+- If not on Ubuntu or in case of issue with graphical backend, comment out first line in runner scripts:
 ```
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 ```
