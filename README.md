@@ -17,7 +17,8 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
   
 ## Requirements
 
-(Tested for Ubuntu 22.04)
+(Tested on Ubuntu 22.04)
+
 (Optionally create a visual environment like conda before installing)
 
 Please install Pytorch.
