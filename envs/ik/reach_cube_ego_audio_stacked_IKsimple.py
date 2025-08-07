@@ -68,7 +68,7 @@ class ReachCubeEgoAudioStackedEnv:
         # Curriculum parameters (exactly from torque script)
         self.episodes_per_position = episodes_per_position
         self.window_size = window_size
-        self.reward_thresholds = reward_thresholds or [3, 3, 3, 3, 3.5, 3.5, 3.5]
+        self.reward_thresholds = reward_thresholds or [2, 2, 2, 2, 2.5, 2.5, 2.5]
         self.last_rewards = deque(maxlen=self.window_size)
         self.x_bounds = [0.4, 0.2, 0.0, -0.2, -0.4, -0.6]
         self.fixed_x = 0.6
