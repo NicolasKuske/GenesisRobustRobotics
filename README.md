@@ -19,9 +19,11 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
 
 (Tested on Ubuntu 22.04)
 
-(Optionally create a visual environment like conda before installing)
+Clone the repo into your workspace: `git clone https://github.com/NicolasKuske/GenesisRobustRobotics.git`
 
-Please install Pytorch.
+(Optionally create a visual environment like conda before installing any packages)
+
+Please install Pytorch fitting for your system.
 
 You get the Genesis dependencies via: 
 ```
@@ -36,15 +38,13 @@ pip install tensorboard librosa sounddevice
 apt-get update && apt-get install -y libegl1-mesa libegl1-mesa-dev libgles2-mesa libgles2-mesa-dev libgl1-mesa-dev libglvnd-dev libxrender1 libxext6 libsm6 libgl1-mesa-glx libportaudio2 libasound-dev
 ```
 
-Get the repo `git clone https://github.com/NicolasKuske/GenesisRobustRobotics.git`
-
-Ready to roll!
+Ready to roll! 🚀
 
 ```bash
 cd GenesisRobustRobotics
 python runners/ik/run_ppo_multimodal_IKsimple.py -v -n 1 {-d cpu}
 ```
-(Runs on GPU without flag: -d cpu)
+(Defaults to GPU usage without '-d cpu' flag)
 
 #### Possible issue solutions
 - In case of issue with igl expected parameter mismatch: 
