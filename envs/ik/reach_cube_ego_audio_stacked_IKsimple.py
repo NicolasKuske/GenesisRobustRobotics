@@ -254,16 +254,16 @@ class ReachCubeEgoAudioStackedEnv:
         obs = self._build_observation()
 
         # **CHANGE HERE**: Gripper XYZ position instead of joints
-        gripper_pos = ((left + right) / 2).clone()
+        #gripper_pos = ((left + right) / 2).clone()
 
-        gripper_pos_history = deque([gripper_pos.clone() for _ in range(self.history_length)],
-                                    maxlen=self.history_length)
-        self.gripper_pos_history = gripper_pos_history
+        #gripper_pos_history = deque([gripper_pos.clone() for _ in range(self.history_length)],
+                                    #maxlen=self.history_length)
+        #self.gripper_pos_history = gripper_pos_history
 
-        stacked_gripper_pos = torch.stack(list(self.gripper_pos_history), dim=1).reshape(self.num_envs, -1)
+        #stacked_gripper_pos = torch.stack(list(self.gripper_pos_history), dim=1).reshape(self.num_envs, -1)
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        return obs, stacked_gripper_pos, done_array
+        return obs, done_array
 
         #return obs, done_array
 
@@ -308,13 +308,13 @@ class ReachCubeEgoAudioStackedEnv:
         dones = success.bool()
 
         # **CHANGE HERE**: Gripper XYZ position instead of joints
-        gripper_pos = ((left + right) / 2).clone()
-        self.gripper_pos_history.append(gripper_pos)
+        #gripper_pos = ((left + right) / 2).clone()
+        #self.gripper_pos_history.append(gripper_pos)
 
-        stacked_gripper_pos = torch.stack(list(self.gripper_pos_history), dim=1).reshape(self.num_envs, -1)
+        #stacked_gripper_pos = torch.stack(list(self.gripper_pos_history), dim=1).reshape(self.num_envs, -1)
         # Print stacked XYZ history for environment 0
         #print("[Env 0 Stacked Gripper History]:", stacked_gripper_pos[0].cpu().numpy())
-        return obs, stacked_gripper_pos, rewards, dones
+        return obs,rewards, dones
 
         #return obs, rewards, dones
 
