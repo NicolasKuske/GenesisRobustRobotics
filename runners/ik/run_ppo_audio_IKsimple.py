@@ -38,6 +38,8 @@ def train_ppo(args):
 
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
+        gripper_dim=3 * env.history_length,
+        #joint_dim=7 * len(env.sample_offsets),
         action_shape=env.action_space,
         lr=1e-3,
         gamma=0.99,
@@ -59,32 +61,29 @@ def run(env, agent, args, writer):
     num_episodes = 1000000
 
     for episode in range(num_episodes):
-        state, done_array = env.reset()
+        audio_state, joint_state, done_array = env.reset()
 
         total_reward = torch.zeros(env.num_envs).to(args.device)
 
-        states, actions, rewards, dones = [], [], [], []
+        audio_states, joint_states, actions, rewards, dones = [], [], [], [], []
 
         for step in range(100):
-            action = agent.select_action(state)
-            next_state, reward, done = env.step(action)
+            action = agent.select_action(audio_state, joint_state)
+            next_audio_state, next_joint_state, reward, done = env.step(action)
 
-            if next_state is None:  # Curriculum completed during step
-                done_array = torch.ones(env.num_envs, dtype=torch.bool).to(args.device)
-                break
-
-            states.append(state)
+            audio_states.append(audio_state)
+            joint_states.append(joint_state)
             actions.append(action)
             rewards.append(reward)
             dones.append(done)
 
-            state = next_state
+            audio_state, joint_state = next_audio_state, next_joint_state
             total_reward += reward
             done_array = torch.logical_or(done_array, done)
             if done_array.all():
                 break
 
-        agent.train(states, actions, rewards, dones)
+        agent.train(audio_states, joint_states, actions, rewards, dones)
 
         if episode % 3 == 0:
             agent.save_checkpoint()
@@ -93,7 +92,6 @@ def run(env, agent, args, writer):
         mean_reward = total_reward.mean().item()
         writer.add_scalar('Reward/Mean', mean_reward, episode)
 
-        # Added this line clearly at the end of the episode:
         print(f"[Episode {episode}] Mean Reward: {mean_reward:.4f}, Total Reward: {total_reward}\n")
 
 
