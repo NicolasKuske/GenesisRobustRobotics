@@ -6,7 +6,8 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
 
 
 ## 🔥 News
-- [2025-07-22] Choose between direct torque control and inverse kinematics for all classes
+- [2025-08-03] Added commandline noise option for all modalities (IK only)
+- [2025-07-22] Choose between direct torque control and inverse kinematics (IK) for all classes
 - [2025-07-11] Added vision-audio multimodal class
 - [2025-06-30] Added task-model classes for audio-modality
 - [2025-06-17] Revolving task-model classes 
@@ -16,14 +17,49 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
   
 ## Requirements
 
-Please install Pytorch.
+(Tested for Ubuntu 22.04)
+(Optionally create a visual environment like conda before installing)
 
+Please install Pytorch.
 
 You get the Genesis dependencies via: 
 ```
-pip install genesis-world 0.2.1
+pip install genesis-world==0.2.1
 ```
+
+Additional dependencies:
+```
+pip install tensorboard librosa sounddevice
+```
+```
+apt-get update && apt-get install -y libegl1-mesa libegl1-mesa-dev libgles2-mesa libgles2-mesa-dev libgl1-mesa-dev libglvnd-dev libxrender1 libxext6 libsm6 libgl1-mesa-glx libportaudio2 libasound-dev
+```
+
+Get the repo
+```
+git clone https://github.com/NicolasKuske/GenesisRobustRobotics.git
+```
+
 Ready to roll!
+
+```bash
+cd GenesisRobustRobotics
+python runners/ik/run_ppo_multimodal_IKsimple.py -v -n 1 {-d cpu}
+```
+(Runs on GPU without flag: -d cpu)
+
+#### Possible issue solutions
+In case of issue with igl expected parameter mismatch: 
+```
+cp {/your workspace}/GenesisRobustRobotics/rigid_geom.py {/usr/local/lib/python3.11/dist-packages}/genesis/engine/entities/rigid_entity/rigid_geom.py
+```
+adapt to your workspace and Genesis installation directory.
+
+If not on Ubuntu or in case of issue with graphical backend, comment out first line in runner scripts:
+```
+os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
+```
+
 
 
 ## Command-line Arguments
