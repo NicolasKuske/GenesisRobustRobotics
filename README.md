@@ -39,6 +39,7 @@ apt-get update && apt-get install -y libegl1-mesa libegl1-mesa-dev libgles2-mesa
 ```
 
 Ready to roll! 🚀
+
 (Defaults to GPU usage without `-d cpu` flag)
 
 ```bash
