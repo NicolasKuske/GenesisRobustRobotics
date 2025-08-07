@@ -21,7 +21,7 @@ Please install Pytorch.
 
 You get the Genesis dependencies via: 
 ```
-pip install genesis-world
+pip install genesis-world 0.2.1
 ```
 Ready to roll!
 
