@@ -5,14 +5,14 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from networks.ik.ppo_audio_IKsimple import PPOaudioJoints
+from networks.ik.ppo_audio_IKsimple import PPOaudioGripper
 
 
 class PPOAgentAudio:
     def __init__(
             self,
             obs_shape,  # audio observation shape (C, F, T)
-            joint_dim,  # dimension of joint state vector
+            gripper_dim,  # dimension of joint state vector
             action_shape,  # number of discrete actions
             lr,
             gamma,
@@ -26,7 +26,7 @@ class PPOAgentAudio:
         self.num_envs = num_envs
         self.checkpoint_path = checkpoint_path
 
-        self.model = PPOaudioJoints(obs_shape, joint_dim, action_shape).to(self.device)
+        self.model = PPOaudioJoints(obs_shape, gripper_dim, action_shape).to(self.device)
 
         if load:
             self.load_checkpoint()

@@ -5,28 +5,28 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from networks.ik.ppo_audio_IKsimple import PPOaudio  # your conv-based PPO class
+from networks.ik.ppo_audio_IKsimple import PPOaudioGripper
 
 
 class PPOAgentAudio:
     def __init__(
-        self,
-        obs_shape,            # tuple, e.g. (3, 120, 120)
-        action_shape,           # number of discrete actions
-        lr,
-        gamma,
-        clip_epsilon,
-        device,
-        load=False,
-        num_envs=1,
-        checkpoint_path=None
+            self,
+            obs_shape,  # audio observation shape (C, F, T)
+            gripper_dim,  # dimension of joint state vector
+            action_shape,  # number of discrete actions
+            lr,
+            gamma,
+            clip_epsilon,
+            device,
+            load=False,
+            num_envs=1,
+            checkpoint_path=None
     ):
         self.device = device
         self.num_envs = num_envs
         self.checkpoint_path = checkpoint_path
 
-        # instantiate our conv-based policy networks
-        self.model = PPOaudio(obs_shape, action_shape).to(self.device)
+        self.model = PPOaudioGripper(obs_shape, gripper_dim, action_shape).to(self.device)
 
         if load:
             self.load_checkpoint()
@@ -49,15 +49,12 @@ class PPOAgentAudio:
         self.model.eval()
         print(f"Checkpoint loaded from {self.checkpoint_path}")
 
-    def select_action(self, state, inference=False):
-        """
-        state: tensor of shape (num_envs, C, H, W), float32 in [0,1]
-        inference: bool, True selects greedy actions, False samples from distribution
-        returns: tensor of shape (num_envs,) with discrete actions
-        """
-        state = state.to(self.device)
+    def select_action(self, audio_state, joint_state, inference=False):
+        audio_state = audio_state.to(self.device)
+        joint_state = joint_state.to(self.device)
+
         with torch.no_grad():
-            _, logits = self.model(state)
+            logits = self.model(audio_state, joint_state)
 
         probs = nn.functional.softmax(logits, dim=-1)
         dist = Categorical(probs)
@@ -69,14 +66,13 @@ class PPOAgentAudio:
 
         return action
 
-    def train(self, states, actions, rewards, dones):
-        states_tensor = torch.stack(states).to(self.device)
+    def train(self, audio_states, joint_states, actions, rewards, dones):
+        audio_states_tensor = torch.stack(audio_states).to(self.device)
+        joint_states_tensor = torch.stack(joint_states).to(self.device)
         actions_tensor = torch.stack(actions).to(self.device)
+
         rewards_list = rewards
         dones_list = dones
-
-        #print(f"[DEBUG] states_tensor shape: {states_tensor.shape}")
-        #print(f"[DEBUG] actions_tensor shape: {actions_tensor.shape}")
 
         discounted_rewards = []
         R = torch.zeros(self.num_envs, device=self.device)
@@ -87,27 +83,20 @@ class PPOAgentAudio:
 
         advantages = discounted_tensor - discounted_tensor.mean()
 
-        #print(f"[DEBUG] discounted_tensor shape: {discounted_tensor.shape}")
+        T, N = audio_states_tensor.shape[:2]
+        C, H, W = audio_states_tensor.shape[2:]
 
-        # Now check dimensions explicitly
-        #print(f"[DEBUG] len(states_tensor.shape): {len(states_tensor.shape)}")
-
-        T, N = states_tensor.shape[:2]
-        if len(states_tensor.shape) == 5:
-            C, H, W = states_tensor.shape[2:]
-            states_flat = states_tensor.reshape(T * N, C, H, W)
-        else:
-            raise ValueError(f"Unexpected states_tensor shape: {states_tensor.shape}")
-
-        with torch.no_grad():
-            _,logits_old = self.model(states_flat)
-            probs_old = nn.functional.softmax(logits_old, dim=-1)
-
+        audio_states_flat = audio_states_tensor.reshape(T * N, C, H, W)
+        joint_states_flat = joint_states_tensor.reshape(T * N, -1)
         actions_flat = actions_tensor.view(-1)
         advantages_flat = advantages.view(-1)
 
+        with torch.no_grad():
+            logits_old = self.model(audio_states_flat, joint_states_flat)
+            probs_old = nn.functional.softmax(logits_old, dim=-1)
+
         for _ in range(10):
-            _,logits_new = self.model(states_flat)
+            logits_new = self.model(audio_states_flat, joint_states_flat)
             probs_new = nn.functional.softmax(logits_new, dim=-1)
 
             dist_old = Categorical(probs_old)
@@ -122,5 +111,3 @@ class PPOAgentAudio:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-
-
