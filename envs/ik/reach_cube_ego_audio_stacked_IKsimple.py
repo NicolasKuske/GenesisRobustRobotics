@@ -313,7 +313,7 @@ class ReachCubeEgoAudioStackedEnv:
 
         stacked_gripper_pos = torch.stack(list(self.gripper_pos_history), dim=1).reshape(self.num_envs, -1)
         # Print stacked XYZ history for environment 0
-        print("[Env 0 Stacked Gripper History]:", stacked_gripper_pos[0].cpu().numpy())
+        #print("[Env 0 Stacked Gripper History]:", stacked_gripper_pos[0].cpu().numpy())
         return obs, stacked_gripper_pos, rewards, dones
 
         #return obs, rewards, dones
