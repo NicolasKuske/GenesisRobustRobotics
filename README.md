@@ -6,7 +6,8 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
 
 
 ## 🔥 News
-- [2025-07-22] Choose between direct torque control and inverse kinematics for all classes
+- [2025-08-03] Added commandline noise option for all modalities (IK only)
+- [2025-07-22] Choose between direct torque control and inverse kinematics (IK) for all classes
 - [2025-07-11] Added vision-audio multimodal class
 - [2025-06-30] Added task-model classes for audio-modality
 - [2025-06-17] Revolving task-model classes 
@@ -14,31 +15,53 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
 - [2025-06-13] Set up the repository
 
   
-## Requirements
+## 🚀 Requirements
 
-Please install Pytorch.
+(Tested on Ubuntu 22.04)
 
+Clone the repo into your workspace: `git clone https://github.com/NicolasKuske/GenesisRobustRobotics.git`
+
+Please install Pytorch fitting for your system.
+
+(Optionally create a visual environment like conda before installing any packages)
 
 You get the Genesis dependencies via: 
 ```
-pip install genesis-world
+pip install genesis-world==0.2.1
 ```
-Ready to roll!
+
+Additional dependencies:
+```
+pip install tensorboard librosa sounddevice
+```
+```
+apt-get update && apt-get install -y libegl1-mesa libegl1-mesa-dev libgles2-mesa libgles2-mesa-dev libgl1-mesa-dev libglvnd-dev libxrender1 libxext6 libsm6 libgl1-mesa-glx libportaudio2 libasound-dev
+```
+
+🚀 Ready to roll! 
+
+(Defaults to GPU usage without `-d cpu` flag)
+
+```bash
+cd GenesisRobustRobotics
+python runners/ik/run_ppo_multimodal_IKsimple.py -v -n 1 {-d cpu}
+```
 
 
-## Command-line Arguments
+#### 🛠️ Issue solutions
 
-- `-v` or `--vis` enables visualization.
-- `-l` or `--load_path` specifies the loading path of a previously saved model checkpoint. Do **not** include this argument if you intend to train your model from scratch.
-- `-n` or `--num_envs` specifies the number of parallel environments. If none is provided, the default is `1`.
-- `-b` or `--batch_size` defines the batch size used for training. If none is provided, the default is `64 * num_envs`.
-- `-t` or `--task` specifies the task to train on. If none is provided, the default is `GraspFixedBlock`. Available tasks include:
-  - `GraspFixedBlock`: Environment for grasping a fixed block.
-  - `GraspRandomBlock`: Environment for grasping a randomly placed block.
+- In case of issue with igl expected parameter mismatch: 
+```
+cp {/your workspace}/GenesisRobustRobotics/rigid_geom.py {/usr/local/lib/python3.11/dist-packages}/genesis/engine/entities/rigid_entity/rigid_geom.py
+```
+adapt to your workspace and Genesis installation directory.
 
+- If not on Ubuntu or in case of issue with graphical backend, comment out first line in runner scripts:
+```
+os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
+```
 
-
-## Usage
+## ⚙️ Usage
 
 - Training
 
@@ -55,26 +78,42 @@ Exchange 'position' with 'vision' for vision based RL, or use 'multimodal' for v
 
 To test the trained policy, you can load a pretrained model from the checkpoint (if one has been saved) and visualize the rollout, by executing the script with the following command-line arguments:
 ```bash
-python runners/{control_directory}/run_ppo_{modality}_{controller}.py -v -l `logs/{task}_{modality}_checkpoint_released.pth` 
+python runners/{control_directory}/run_ppo_{modality}_{controller}.py -v -l `logs/{task}_{modality}_ppo_checkpoint.pth` 
 ```
 Similarly, you can specify `modality` as you like.
 
 
-## Saving and Loading Checkpoints
+#### 📈 Progress Plots
 
-The agent periodically saves the model's weights and the target network state for later resumption. 
+Launch TensorBoard in the project directory (where /runs is the folder that stores the checkpoint logfiles):
+```bash
+tensorboard --logdir runs --host 0.0.0.0 --port 6006
+```
+
+And on your local browser `http://localhost:6006`
+
+
+## 💾 Saving and Loading Checkpoints
+
+The agent periodically saves the model's weights and the target network state for later resumption (see the runner scripts). 
 
 ```python
-def save_checkpoint(self, file_path):
-    checkpoint = {
-        'model_state_dict': self.model.state_dict(),
-        'target_model_state_dict': self.target_model.state_dict()
-    }
-    torch.save(checkpoint, file_path)
-```
-You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}_{algo}_checkpoint_released.pth` (if it has been saved).
 
-## MacOS Usage
+if episode % 3 == 0:
+     agent.save_checkpoint()
+     print(f"\n Saved checkpoint to logs :)\n ")
+```
+You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}_ppo_checkpoint.pth` (if it has been saved).
+
+## ✅ Command-line Arguments
+
+- `-v` or `--vis` enables visualization.
+- `-l` or `--load_path` specifies the loading path of a previously saved model checkpoint. Do **not** include this argument if you intend to train your model from scratch.
+- `-n` or `--num_envs` specifies the number of parallel environments. If none is provided, the default is `1`.
+
+And many more explained in the runner scripts...
+
+## 🍏 MacOS Usage
 
 - Training
 
