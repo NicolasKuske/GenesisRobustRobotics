@@ -78,7 +78,7 @@ Exchange 'position' with 'vision' for vision based RL, or use 'multimodal' for v
 
 To test the trained policy, you can load a pretrained model from the checkpoint (if one has been saved) and visualize the rollout, by executing the script with the following command-line arguments:
 ```bash
-python runners/{control_directory}/run_ppo_{modality}_{controller}.py -v -l `logs/{task}_{modality}_checkpoint_released.pth` 
+python runners/{control_directory}/run_ppo_{modality}_{controller}.py -v -l `logs/{task}_{modality}_ppo_checkpoint.pth` 
 ```
 Similarly, you can specify `modality` as you like.
 
@@ -95,17 +95,15 @@ And on your local browser `http://localhost:6006`
 
 ## 💾 Saving and Loading Checkpoints
 
-The agent periodically saves the model's weights and the target network state for later resumption. 
+The agent periodically saves the model's weights and the target network state for later resumption (see the runner scripts). 
 
 ```python
-def save_checkpoint(self, file_path):
-    checkpoint = {
-        'model_state_dict': self.model.state_dict(),
-        'target_model_state_dict': self.target_model.state_dict()
-    }
-    torch.save(checkpoint, file_path)
+
+if episode % 3 == 0:
+     agent.save_checkpoint()
+     print(f"\n Saved checkpoint to logs :)\n ")
 ```
-You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}_{algo}_checkpoint_released.pth` (if it has been saved).
+You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}_ppo_checkpoint.pth` (if it has been saved).
 
 ## ✅ Command-line Arguments
 
