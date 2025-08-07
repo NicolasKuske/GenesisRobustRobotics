@@ -38,7 +38,7 @@ pip install tensorboard librosa sounddevice
 apt-get update && apt-get install -y libegl1-mesa libegl1-mesa-dev libgles2-mesa libgles2-mesa-dev libgl1-mesa-dev libglvnd-dev libxrender1 libxext6 libsm6 libgl1-mesa-glx libportaudio2 libasound-dev
 ```
 
-Ready to roll! 
+🚀 Ready to roll! 
 
 (Defaults to GPU usage without `-d cpu` flag)
 
