@@ -72,7 +72,7 @@ python runners/ik/run_ppo_position_IKsimple.py -n 10
 Exchange 'position' with 'vision' for vision based RL, or use 'multimodal' for vision-audio based multimodal RL. 
 
 
-<img  src="figs/train.gif" width="300">      &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;  <img  src="figs/multimodal.png" width="600"> 
+<img  src="figs/train.gif" width="250">      &nbsp;&nbsp;&nbsp;&nbsp;   <img  src="figs/multimodal.png" width="650"> 
 
 - Evaluation
 
