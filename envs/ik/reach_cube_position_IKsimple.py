@@ -48,9 +48,6 @@ class ReachCubePositionEnv:
 
         self.completed = False
 
-        self.success_thresh = 0.3
-        self.success_bonus = 50.0
-
         self.episode_count = 0
         self.sum_rewards = None
 

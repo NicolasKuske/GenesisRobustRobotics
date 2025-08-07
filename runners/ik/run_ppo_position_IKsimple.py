@@ -1,4 +1,4 @@
-# run_ppo_position_IK.py
+# run_ppo_position_IKsimple.py
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
