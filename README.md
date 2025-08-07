@@ -48,7 +48,8 @@ python runners/ik/run_ppo_multimodal_IKsimple.py -v -n 1 {-d cpu}
 ```
 
 
-#### Possible issue solutions
+#### 🛠️ Issue solutions
+
 - In case of issue with igl expected parameter mismatch: 
 ```
 cp {/your workspace}/GenesisRobustRobotics/rigid_geom.py {/usr/local/lib/python3.11/dist-packages}/genesis/engine/entities/rigid_entity/rigid_geom.py
@@ -60,21 +61,7 @@ adapt to your workspace and Genesis installation directory.
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 ```
 
-
-
-## Command-line Arguments
-
-- `-v` or `--vis` enables visualization.
-- `-l` or `--load_path` specifies the loading path of a previously saved model checkpoint. Do **not** include this argument if you intend to train your model from scratch.
-- `-n` or `--num_envs` specifies the number of parallel environments. If none is provided, the default is `1`.
-- `-b` or `--batch_size` defines the batch size used for training. If none is provided, the default is `64 * num_envs`.
-- `-t` or `--task` specifies the task to train on. If none is provided, the default is `GraspFixedBlock`. Available tasks include:
-  - `GraspFixedBlock`: Environment for grasping a fixed block.
-  - `GraspRandomBlock`: Environment for grasping a randomly placed block.
-
-
-
-## Usage
+## ⚙️ Usage
 
 - Training
 
@@ -96,7 +83,17 @@ python runners/{control_directory}/run_ppo_{modality}_{controller}.py -v -l `log
 Similarly, you can specify `modality` as you like.
 
 
-## Saving and Loading Checkpoints
+#### 📈 Progress Plots
+
+Launch TensorBoard in the project directory (where /runs is the folder that stores the checkpoint logfiles):
+```bash
+tensorboard --logdir runs --host 0.0.0.0 --port 6006
+```
+
+And on your local browser `http://localhost:6006`
+
+
+## 💾 Saving and Loading Checkpoints
 
 The agent periodically saves the model's weights and the target network state for later resumption. 
 
@@ -110,7 +107,15 @@ def save_checkpoint(self, file_path):
 ```
 You can load a checkpoint by setting the `--load` flag and choosing `logs/{task}_{algo}_checkpoint_released.pth` (if it has been saved).
 
-## MacOS Usage
+## ✅ Command-line Arguments
+
+- `-v` or `--vis` enables visualization.
+- `-l` or `--load_path` specifies the loading path of a previously saved model checkpoint. Do **not** include this argument if you intend to train your model from scratch.
+- `-n` or `--num_envs` specifies the number of parallel environments. If none is provided, the default is `1`.
+
+And many more explained in the runner scripts...
+
+## 🍏 MacOS Usage
 
 - Training
 
