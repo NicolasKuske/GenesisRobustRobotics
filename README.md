@@ -21,9 +21,9 @@ You can choose between xyz-position based, vision-based and audio-based, and mul
 
 Clone the repo into your workspace: `git clone https://github.com/NicolasKuske/GenesisRobustRobotics.git`
 
-(Optionally create a visual environment like conda before installing any packages)
-
 Please install Pytorch fitting for your system.
+
+(Optionally create a visual environment like conda before installing any packages)
 
 You get the Genesis dependencies via: 
 ```
@@ -39,12 +39,13 @@ apt-get update && apt-get install -y libegl1-mesa libegl1-mesa-dev libgles2-mesa
 ```
 
 Ready to roll! 🚀
+(Defaults to GPU usage without `-d cpu` flag)
 
 ```bash
 cd GenesisRobustRobotics
 python runners/ik/run_ppo_multimodal_IKsimple.py -v -n 1 {-d cpu}
 ```
-(Defaults to GPU usage without '-d cpu' flag)
+
 
 #### Possible issue solutions
 - In case of issue with igl expected parameter mismatch: 
