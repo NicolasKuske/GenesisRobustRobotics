@@ -54,6 +54,7 @@ class ReachCubePositionEnv:
         self.current_cube_pos = self._sample_random_pos()
 
         self.scene = gs.Scene(
+            show_FPS=False,
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(3, 2, 1.5), camera_lookat=(0.0, 0.0, 0.5),
                 camera_fov=30, res=(960, 640), max_FPS=60,

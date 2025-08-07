@@ -89,7 +89,7 @@ def run_loop(env, agent, args, writer, train_mode: bool):
 
         states, actions, rewards, dones = [], [], [], []
 
-        for _ in range(200):
+        for _ in range(100):
             action = agent.select_action(state)
             next_state, reward, done = env.step(action)
 
