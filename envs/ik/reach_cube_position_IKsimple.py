@@ -26,7 +26,18 @@ class ReachCubePositionEnv:
         self.reward_thresholds = reward_thresholds
         self.last_episode_rewards = deque(maxlen=self.window_size)
 
-        # (rest of your original init code...)
+        # shaping parameters
+        self.success_thresh = 0.30
+        self.success_bonus = 0.1
+        self.shaping_type = "exp"
+        self.shaping_coef = 10.0
+        self.k = 0.5
+        self.dist_offset = 0.0
+
+        # tracking variables
+        self.prev_dist = None
+        self.sum_delta = None
+        self.sum_success = None
 
         self.fixed_x = 0.6
         self.dynamic_x = False
@@ -94,44 +105,101 @@ class ReachCubePositionEnv:
 
     def reset(self):
         if self.episode_count > 0:
-            mean_reward = self.sum_rewards.mean().item()
-            self.last_episode_rewards.append(mean_reward)
+            shaping = self.sum_delta.cpu().mean().item()
+            bonus = self.sum_success.cpu().mean().item()
+            print(f"[Episode {self.episode_count}] Mean shaping reward: {shaping:.4f}")
+            print(f"[Episode {self.episode_count}] Mean bonus reward:   {bonus:.4f}")
+
+            # Update running reward window
+            self.last_episode_rewards.append(shaping + bonus)
 
             if len(self.last_episode_rewards) == self.window_size and self.x_stage < self.max_stages:
                 threshold = self.reward_thresholds[self.x_stage]
-                if np.mean(self.last_episode_rewards) > threshold:
+                mean_reward = np.mean(self.last_episode_rewards)
+                print(f"[Curriculum] Mean reward: {mean_reward:.4f} (threshold: {threshold:.4f})")
+                if mean_reward > threshold:
                     self.x_stage += 1
                     self.dynamic_x = True
                     self.min_x_dynamic = self.fixed_x - 0.2 * self.x_stage
                     self.last_episode_rewards.clear()
+                    print(
+                        f"[Curriculum] Advanced to stage {self.x_stage}, X-range: [{self.min_x_dynamic:.2f}, {self.max_x_dynamic:.2f}]")
 
         self.episode_count += 1
-        self.sum_rewards = torch.zeros(self.num_envs, device=self.device)
 
+        # Reset reward trackers
+        self.sum_delta = torch.zeros(self.num_envs, device=self.device)
+        self.sum_success = torch.zeros(self.num_envs, device=self.device)
+
+        # Resample cube position periodically
         if (self.episode_count - 1) % self.episodes_per_position == 0:
             self.current_cube_pos = self._sample_random_pos()
+            print(f"[Episode {self.episode_count}] New cube positions:\n{self.current_cube_pos}")
 
+        # Build environment and set cube
         self.build_env()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
 
+        # Construct initial observation
         obj_pos = self.cube.get_pos()
-        grip_pos = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos()) / 2
-        return torch.cat([obj_pos, grip_pos], dim=1)
-
-    def step(self, actions):
-        move_offsets = torch.tensor([[0.05, 0, 0], [-0.05, 0, 0], [0, 0.05, 0], [0, -0.05, 0], [0, 0, 0.05], [0, 0, -0.05]], device=self.device)
-        pos = self.franka.get_link("hand").get_pos() + move_offsets[actions]
-        qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=pos, quat=self.quat)
-        self.franka.control_dofs_position(qpos[:, :-2], torch.arange(7, device=self.device), self.envs_idx)
-        self.scene.step()
-
-        obj_pos = self.cube.get_pos()
-        grip_pos = (self.franka.get_link("left_finger").get_pos() + self.franka.get_link("right_finger").get_pos()) / 2
+        grip_pos = (
+                           self.franka.get_link("left_finger").get_pos() +
+                           self.franka.get_link("right_finger").get_pos()
+                   ) / 2
         state = torch.cat([obj_pos, grip_pos], dim=1)
 
-        dist = torch.norm(obj_pos - grip_pos, dim=1)
-        reward = torch.exp(-4 * (dist - 0.1)) + (dist < self.success_thresh).float() * self.success_bonus
-        self.sum_rewards += reward
-        done = dist < self.success_thresh
+        # Initialize previous distance
+        self.prev_dist = torch.norm(obj_pos - grip_pos, dim=1)
+
+        return state
+
+    def step(self, actions):
+        # Define move offsets
+        move_offsets = torch.tensor([
+            [0.05, 0, 0], [-0.05, 0, 0],
+            [0, 0.05, 0], [0, -0.05, 0],
+            [0, 0, 0.05], [0, 0, -0.05]
+        ], device=self.device)
+
+        # Compute new positions from actions
+        pos = self.franka.get_link("hand").get_pos() + move_offsets[actions]
+
+        # Inverse kinematics and control
+        qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=pos, quat=self.quat)
+        self.franka.control_dofs_position(qpos[:, :-2], torch.arange(7, device=self.device), self.envs_idx)
+        self.franka.control_dofs_position(self.fixed_finger_pos, torch.arange(7, 9, device=self.device), self.envs_idx)
+        self.scene.step()
+
+        # Observe new state
+        obj_pos = self.cube.get_pos()
+        grip_pos = (
+                           self.franka.get_link("left_finger").get_pos() +
+                           self.franka.get_link("right_finger").get_pos()
+                   ) / 2
+        state = torch.cat([obj_pos, grip_pos], dim=1)
+
+        # Reward shaping and success bonus
+        dist_new = torch.norm(obj_pos - grip_pos, dim=1)
+        dist_old = self.prev_dist
+
+        # Exponential shaping reward
+        delta = self.shaping_coef * (
+                torch.exp(-self.k * (dist_new - self.dist_offset)) -
+                torch.exp(-self.k * (dist_old - self.dist_offset))
+        )
+
+        # Success bonus
+        success_mask = dist_new < self.success_thresh
+        bonus = success_mask.float() * self.success_bonus
+
+        # Total reward and done
+        reward = delta + bonus
+        done = success_mask
+
+        # Update trackers
+        self.sum_delta += delta
+        self.sum_success += bonus
+        self.prev_dist = dist_new
 
         return state, reward, done
+
