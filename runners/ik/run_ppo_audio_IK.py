@@ -39,7 +39,7 @@ def train_ppo(args):
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
         action_shape=env.action_space,
-        lr=1e-4,
+        lr=1e-5,
         gamma=0.99,
         clip_epsilon=0.2,
         device=args.device,
@@ -128,58 +128,61 @@ def inference_ppo(args):
         vis=args.vis,
         device=args.device,
         num_envs=args.num_envs,
-        episodes_per_position=1,
+        episodes_per_position=1,  # sample new cube pos each episode
         noise_config={"audio_noise_level": args.audio_noise_level}
     )
 
-    env.x_stage = env.max_stages
-    print(f"[INFO] Inference environment (full curriculum range): {env}")
+    # Optional: allow full X-range during inference (if curriculum exists)
+    if hasattr(env, "max_stages"):
+        env.x_stage = env.max_stages
 
     agent = PPOAgentAudio(
         obs_shape=env.obs_shape,
         action_shape=env.action_space,
-        lr=1e-3,
-        gamma=0.99,
-        clip_epsilon=0.2,
         device=args.device,
         load=True,
         num_envs=args.num_envs,
         checkpoint_path=args.checkpoint_path
     )
-
-    print(f"[INFO] Loaded checkpoint from {args.checkpoint_path}")
+    agent.eval_mode(True)  # freeze dropout/bn and avoid training-time behavior
 
     writer = SummaryWriter(log_dir=f"runs/{args.task}_inference")
 
-    for ep in range(args.num_episodes):
-        state, done_array = env.reset()
+    # Greedy by default; change to False for stochastic eval
+    deterministic = True
 
+    for ep in range(args.num_episodes):
+        state, _ = env.reset()
         if state is None:
             print("[INFO] Environment returned None on reset, ending inference.")
             break
 
         steps = 0
-        total_reward = torch.zeros(args.num_envs).to(args.device)
+        total_reward = torch.zeros(args.num_envs, device=args.device)
 
         while steps < 100:
-            action = agent.select_action(state, inference=True)
+            action = agent.act(state, deterministic=deterministic)
             next_state, reward, done = env.step(action)
 
             if next_state is None:
                 print("[INFO] Environment returned None during step, stopping current episode.")
                 break
 
-            total_reward += reward
+            total_reward += reward.to(args.device)
             state = next_state
             steps += 1
+
+            # stop early if all envs solved
+            if done.all():
+                break
 
         mean_reward = total_reward.mean().item()
         writer.add_scalar('Inference/MeanReward', mean_reward, ep)
         writer.add_scalar('Inference/Steps', steps, ep)
-
         print(f"[Inference {ep+1}/{args.num_episodes}] Steps: {steps}, Mean Reward: {mean_reward:.3f}")
 
     writer.close()
+
 
 
 def arg_parser():

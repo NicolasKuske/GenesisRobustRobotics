@@ -60,14 +60,35 @@ class PPOAgentAudio:
 
     @torch.no_grad()
     def select_action(self, state: torch.Tensor):
-        # state: [N, C, F, T]
+        """
+        Stochastic action for TRAINING.
+        Returns: action, log_prob, entropy, value
+        """
         logits, value = self.model(state.to(self.device))
-        probs = torch.softmax(logits, dim=-1)
-        dist = Categorical(probs)
+        dist = Categorical(logits=logits)  # numerically stable (no manual softmax)
         action = dist.sample()
         log_prob = dist.log_prob(action)
         entropy = dist.entropy()
         return action, log_prob, entropy, value
+
+    @torch.no_grad()
+    def act(self, state: torch.Tensor, deterministic: bool = False):
+        """
+        Inference helper: returns ONLY the action.
+        - deterministic=True -> argmax
+        - deterministic=False -> sample
+        """
+        logits, _ = self.model(state.to(self.device))
+        if deterministic:
+            return logits.argmax(dim=-1)
+        return Categorical(logits=logits).sample()
+
+    def eval_mode(self, enabled: bool = True):
+        """Put the model into eval() or train() mode."""
+        if enabled:
+            self.model.eval()
+        else:
+            self.model.train()
 
     def _compute_gae(self, rewards, values, dones, next_value):
         T, N = rewards.shape

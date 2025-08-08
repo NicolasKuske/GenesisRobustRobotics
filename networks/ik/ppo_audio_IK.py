@@ -17,7 +17,9 @@ class PPOaudio(nn.Module):
         )
 
         with torch.no_grad():
-            dummy = torch.zeros(1, C, F, T)
+            # ensure shape-probing runs on the same device as the module
+            dev = next(self.parameters()).device if len(list(self.parameters())) else torch.device('cpu')
+            dummy = torch.zeros(1, C, F, T, device=dev)
             flat_dim = self.conv(dummy).view(1, -1).size(1)
 
         self.shared = nn.Sequential(
