@@ -188,7 +188,7 @@ def arg_parser():
     p.add_argument("-l", "--load_path", nargs="?", const="default", default=None,
                    help="`-l` alone loads default checkpoint; `-l path.pth` loads that file")
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
-    p.add_argument("-t", "--task", type=str, default="ReachCubeEgoAudio", help="Task")
+    p.add_argument("-t", "--task", type=str, default="ReachCubeEgoAudioStacked", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
     p.add_argument("--audio_noise_level", type=float, default=0.0, help="Level of audio noise")
     p.add_argument("-m", "--mode", choices=['train', 'inference'], default='train', help="Run mode")
