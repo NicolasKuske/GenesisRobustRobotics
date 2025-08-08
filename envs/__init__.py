@@ -17,7 +17,7 @@ from envs.ik.reach_cube_ego_vision_stacked_IKsimple import ReachCubeEgoVisionSta
 
 #end effector microphone only
 from envs.ik.reach_cube_ego_audio_IKsimple import ReachCubeEgoAudioEnv
-from envs.ik.reach_cube_ego_audio_stacked_IKsimple import ReachCubeEgoAudioStackedEnv
+from envs.ik.reach_cube_ego_audio_stacked_IK import ReachCubeEgoAudioStackedEnv
 
 #both end effector vision and microphone
 from envs.ik.reach_cube_ego_multimodal_stacked_IKsimple import ReachCubeEgoMultimodalStackedEnv
