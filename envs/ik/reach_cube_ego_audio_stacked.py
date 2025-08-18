@@ -109,7 +109,7 @@ class ReachCubeEgoAudioStackedEnv:
 
         # Neutral joint configuration
         neutral_q = torch.tensor(
-            [.4, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02],
+            [-1., -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02],
             device=self.device
         ).unsqueeze(0).repeat(self.num_envs, 1)
 
@@ -133,9 +133,10 @@ class ReachCubeEgoAudioStackedEnv:
 
     def _sample_cube_positions(self, n: int) -> np.ndarray:
         """Sample n independent cube positions in workspace bounds."""
-        xy = np.random.uniform(0.2, 0.8, size=(n, 2))
-        z = np.random.uniform(0.2, 0.8, size=(n, 1))
-        return np.concatenate([xy, z], axis=1)
+        x = np.random.uniform(0.4, 0.8, size=(n, 1))
+        y = np.random.uniform(-0.4, -0.8, size=(n, 1))
+        z = np.random.uniform(0.1, 0.8, size=(n, 1))
+        return np.concatenate([x,y, z], axis=1)
 
     def simulate_audio(self, dist: float) -> np.ndarray:
         sr, dur = 22050, 0.01
