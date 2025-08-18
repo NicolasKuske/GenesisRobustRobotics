@@ -110,7 +110,7 @@ class ReachCubeEgoVisionStackedEnv:
         self.fingers_dof = torch.arange(7,9, device=self.device)
 
         q0 = torch.tensor(
-            [-1.0, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02],
+            [0.4, -0.3, 0.3, -1.0, -0.1, 1.7, 1.0, 0.02, 0.02],
             dtype=torch.float32, device=self.device
         ).unsqueeze(0).repeat(self.num_envs, 1)
         self.franka.set_qpos(q0, envs_idx=self.envs_idx)
