@@ -57,7 +57,10 @@ class ReachCubeEgoAudioStackedEnv:
         # --- Curriculum-by-performance state ---
         self.pos_count = len(self.cube_positions)
         self.current_idx = 0  # which position we're currently training
-        self.best_return = np.full(self.pos_count, -np.inf, dtype=np.float32)  # per-position best
+        # Track last episode return per position (not best-ever)
+        self.last_return = np.full(self.pos_count, -np.inf, dtype=np.float32)
+        self.advance_margin = 0.0  # set >0 to allow small gap, e.g. 0.5
+
         self.repeat_counter = 0
 
         # Episode accounting
@@ -228,42 +231,47 @@ class ReachCubeEgoAudioStackedEnv:
 
     def reset(self) -> torch.Tensor:
         """
-        End the previous episode (if any), update per-position best performance,
-        and choose the next position. A position is repeated until its best
-        return is >= the best of the other positions. Then we advance.
+        Close previous episode (if active), update per-position *last-run* return,
+        and decide whether to repeat the current position or advance round-robin.
+        Rule: repeat until current episode return >= max(last-run returns of the others).
         """
-        # --- Close previous episode if one was active ---
+        # --- lazy init for last-run scheduler (safe if already set in __init__) ---
+        if not hasattr(self, "last_return"):
+            self.last_return = np.full(self.pos_count, -np.inf, dtype=np.float32)
+        if not hasattr(self, "advance_margin"):
+            # margin >= 0 means "must meet or exceed"; set negative (e.g., -0.5) to allow small shortfall
+            self.advance_margin = 0.0
+
+        # --- close previous episode, update last-run table, choose next index ---
         if self._episode_active:
             prev_idx = self.current_idx
             prev_ret = float(self._episode_return)
-            # Update best for the previous position
-            self.best_return[prev_idx] = max(self.best_return[prev_idx], prev_ret)
 
-            # Best of *other* positions (only those seen at least once)
-            seen_mask = np.isfinite(self.best_return)
-            seen_mask[prev_idx] = False
-            other_best = np.max(self.best_return[seen_mask]) if np.any(seen_mask) else -np.inf
+            # Update *last-run* return for the position we just trained
+            self.last_return[prev_idx] = prev_ret
 
-            # Decide whether to repeat or advance
-            if self.best_return[prev_idx] < other_best:
-                # Stay on same position until it catches up
-                decision = "repeat to catch up"
+            # Max of other positions' last-run returns
+            others_mask = np.arange(self.pos_count) != prev_idx
+            other_last = np.max(self.last_return[others_mask]) if np.any(others_mask) else -np.inf
+
+            # Decision: repeat if still behind others' last-run; advance otherwise
+            if prev_ret + self.advance_margin < other_last:
+                decision = "repeat to catch up (last-run)"
+                # keep self.current_idx unchanged
             else:
-                # Move to next position round-robin
                 self.current_idx = (prev_idx + 1) % self.pos_count
                 decision = "advance"
 
-            # Log decision
-            br = ", ".join([f"{i}:{'%.3f'%v if np.isfinite(v) else '-'}"
-                            for i, v in enumerate(self.best_return)])
-            print(f"[EP end] pos={prev_idx} return={prev_ret:.3f} | best={br} | decision={decision}")
+            # Log compact status
+            lr = ", ".join([f"{i}:{'%.3f' % v if np.isfinite(v) else '-'}" for i, v in enumerate(self.last_return)])
+            print(f"[EP end] pos={prev_idx} return={prev_ret:.3f} | last={lr} | decision={decision}")
 
-        # --- Start new episode ---
+        # --- start new episode ---
         self.episode_count += 1
         self._episode_return = 0.0
         self._episode_active = True
 
-        # Set cube to current position (broadcast across envs)
+        # Place cube at the selected position (broadcast across envs)
         one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
 
@@ -271,33 +279,29 @@ class ReachCubeEgoAudioStackedEnv:
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        print(f"Episode {self.episode_count}: training position idx={self.current_idx} "
-              f"pos={self.current_cube_pos[0]}")
+        print(f"Episode {self.episode_count}: training position idx={self.current_idx} pos={self.current_cube_pos[0]}")
 
         # Reset histories
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
-        # Collect the first slice
+        # Prime with first spectrogram slice
         first_spec = self._collect_spectrograms(play_audio=False)
         first_raw = self.raw_audio_history[-1].copy()
 
-        # Populate full history
         self.audio_history.clear()
         self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        # Build and optionally plot initial observation
+        # Build initial observation and (single-env) preview
         obs = self._build_observation()
-        if self.num_envs == 1:
+        if self.num_envs == 1 and self._fig is not None:
             self._plot_stacked(obs[0, 0])
 
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         return obs, done_array
-
-
 
     def step(self, actions: torch.Tensor):
         """
