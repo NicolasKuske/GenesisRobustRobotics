@@ -64,7 +64,7 @@ class ReachCubeEgoAudioStackedEnv:
         self._episode_active = False
         self._episode_return = 0.0
 
-        self.cube_durations = [2, 1, 1, 1]  # Number of episodes each position lasts
+        self.cube_durations = [1, 1, 1, 1]  # Number of episodes each position lasts
         self.cube_cycle_length = sum(self.cube_durations)
 
         # History for spectrograms and raw audio
