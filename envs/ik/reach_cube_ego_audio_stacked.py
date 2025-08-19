@@ -232,46 +232,47 @@ class ReachCubeEgoAudioStackedEnv:
     def reset(self) -> torch.Tensor:
         """
         Close previous episode (if active), update per-position *last-run* return,
-        and decide whether to repeat the current position or advance round-robin.
-        Rule: repeat until current episode return >= max(last-run returns of the others).
+        and decide whether to repeat or advance.
+        Rule: repeat until current episode return > min(last-run returns of the others).
         """
-        # --- lazy init for last-run scheduler (safe if already set in __init__) ---
+        # lazy init (safe if already set in __init__)
         if not hasattr(self, "last_return"):
             self.last_return = np.full(self.pos_count, -np.inf, dtype=np.float32)
         if not hasattr(self, "advance_margin"):
-            # margin >= 0 means "must meet or exceed"; set negative (e.g., -0.5) to allow small shortfall
+            # positive => require margin over the min; use 0.0 for strict ">"
             self.advance_margin = 0.0
 
-        # --- close previous episode, update last-run table, choose next index ---
         if self._episode_active:
             prev_idx = self.current_idx
             prev_ret = float(self._episode_return)
 
-            # Update *last-run* return for the position we just trained
+            # update last-run for the position we just trained
             self.last_return[prev_idx] = prev_ret
 
-            # Max of other positions' last-run returns
-            others_mask = np.arange(self.pos_count) != prev_idx
-            other_last = np.max(self.last_return[others_mask]) if np.any(others_mask) else -np.inf
+            # compute the lowest last-run among *other* positions (only those seen)
+            idxs = np.arange(self.pos_count)
+            others = idxs != prev_idx
+            seen_others = np.isfinite(self.last_return) & others
+            other_min = np.min(self.last_return[seen_others]) if np.any(seen_others) else -np.inf
 
-            # Decision: repeat if still behind others' last-run; advance otherwise
-            if prev_ret + self.advance_margin < other_last:
-                decision = "repeat to catch up (last-run)"
-                # keep self.current_idx unchanged
-            else:
+            # decide: advance if strictly better than the lowest other; else repeat
+            if prev_ret > (other_min + self.advance_margin):
                 self.current_idx = (prev_idx + 1) % self.pos_count
                 decision = "advance"
+            else:
+                decision = "repeat to beat lowest-other"
 
-            # Log compact status
-            lr = ", ".join([f"{i}:{'%.3f' % v if np.isfinite(v) else '-'}" for i, v in enumerate(self.last_return)])
-            print(f"[EP end] pos={prev_idx} return={prev_ret:.3f} | last={lr} | decision={decision}")
+            # log
+            lr = ", ".join([f"{i}:{'%.3f' % v if np.isfinite(v) else '-'}"
+                            for i, v in enumerate(self.last_return)])
+            print(f"[EP end] pos={prev_idx} return={prev_ret:.3f} | last={lr} "
+                  f"| others_min={'%.3f' % other_min if np.isfinite(other_min) else '-'} | decision={decision}")
 
-        # --- start new episode ---
+        # start new episode
         self.episode_count += 1
         self._episode_return = 0.0
         self._episode_active = True
 
-        # Place cube at the selected position (broadcast across envs)
         one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
 
@@ -281,11 +282,9 @@ class ReachCubeEgoAudioStackedEnv:
 
         print(f"Episode {self.episode_count}: training position idx={self.current_idx} pos={self.current_cube_pos[0]}")
 
-        # Reset histories
+        # reset histories and prime first slice
         self.audio_history.clear()
         self.raw_audio_history.clear()
-
-        # Prime with first spectrogram slice
         first_spec = self._collect_spectrograms(play_audio=False)
         first_raw = self.raw_audio_history[-1].copy()
 
@@ -295,7 +294,6 @@ class ReachCubeEgoAudioStackedEnv:
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        # Build initial observation and (single-env) preview
         obs = self._build_observation()
         if self.num_envs == 1 and self._fig is not None:
             self._plot_stacked(obs[0, 0])
