@@ -44,6 +44,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.num_envs = num_envs
         self.listen_idx = listen_idx
         self.show_every = show_every
+        self.same_pos_across_envs = False  # <- NEW: toggle shared-position per episode
 
         self.history_length = history_length
         self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
@@ -229,6 +230,9 @@ class ReachCubeEgoAudioStackedEnv:
 
         if (self.episode_count - 1) % self.episodes_per_position == 0:
             self.current_cube_pos = self._sample_cube_pos()
+            if self.same_pos_across_envs:
+                # tile the first sampled position to all envs for this whole episode
+                self.current_cube_pos = np.repeat(self.current_cube_pos[:1], self.num_envs, axis=0)
 
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
