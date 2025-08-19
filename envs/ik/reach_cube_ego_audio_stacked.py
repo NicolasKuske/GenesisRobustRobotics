@@ -44,7 +44,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.num_envs = num_envs
         self.listen_idx = listen_idx
         self.show_every = show_every
-        self.same_pos_across_envs = False  # <- NEW: toggle shared-position per episode
+        self.same_pos_across_envs = True  # <- NEW: toggle shared-position per episode
 
         self.history_length = history_length
         self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
