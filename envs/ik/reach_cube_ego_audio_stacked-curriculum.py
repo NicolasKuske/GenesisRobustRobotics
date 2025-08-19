@@ -28,10 +28,10 @@ class ReachCubeEgoAudioStackedEnv:
             num_envs: int = 1,
             listen_idx: int = 0,
             show_every: int = 10,
-            episodes_per_position: int = 3,
+            episodes_per_position: int = 1,
             history_length: int = 25,
             reward_thresholds=None,
-            window_size: int = 7,
+            window_size: int = 1,
             success_thresh: float = 0.30,
             success_bonus: float = 0.1,
             shaping_coef: float = 10.0,
@@ -113,7 +113,7 @@ class ReachCubeEgoAudioStackedEnv:
             gs.morphs.MJCF(file="assets/xml/franka_emika_panda/panda.xml")
         )
         self.cube = self.scene.add_entity(
-            gs.morphs.Box(size=(0.06, 0.06, 0.06)),
+            gs.morphs.Box(size=(0.06, 0.06, 0.06), collision=False),
             surface=gs.surfaces.Rough(color=(0.99, 0.82, 0.09)),
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
@@ -343,13 +343,23 @@ class ReachCubeEgoAudioStackedEnv:
         plt.pause(0.01)
         self._fig.canvas.flush_events()
 
+
     def _sample_cube_pos(self) -> np.ndarray:
         idx = min(self.x_stage, self.max_stages - 1)
         lower = self.x_bounds[idx]
+
         x = np.random.uniform(lower, self.fixed_x, (self.num_envs, 1))
         y = np.random.uniform(-0.6, 0.6, (self.num_envs, 1))
-        z = np.random.uniform(0.1, 1.0, (self.num_envs, 1))
+        z = np.random.uniform(0.2, 0.6, (self.num_envs, 1))
+
+        # If |x| < 0.2  => sample y uniformly from [-0.6,-0.2] U [0.2,0.6]
+        mask = (np.abs(x) < 0.2).ravel()
+        if mask.any():
+            signs = np.random.choice([-1.0, 1.0], size=(mask.sum(), 1))
+            y[mask] = signs * np.random.uniform(0.2, 0.6, size=(mask.sum(), 1))
+
         return np.concatenate([x, y, z], axis=1)
+
 
     def _process_episode_end(self):
         shaping = self.sum_delta.mean().item()

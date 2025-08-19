@@ -93,7 +93,7 @@ class ReachCubeEgoAudioStackedEnv:
             gs.morphs.MJCF(file="assets/xml/franka_emika_panda/panda.xml")
         )
         self.cube = self.scene.add_entity(
-            gs.morphs.Box(size=(0.06, 0.06, 0.06)),
+            gs.morphs.Box(size=(0.06, 0.06, 0.06), collision=False),
             surface=gs.surfaces.Rough(color=(0.99, 0.82, 0.09)),
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
