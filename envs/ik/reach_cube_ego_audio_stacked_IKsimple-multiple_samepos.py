@@ -45,13 +45,25 @@ class ReachCubeEgoAudioStackedEnv:
         # Number of episodes in easy and hard segments
         # New cube positions and durations
         self.cube_positions = [
-            np.array([0.5, -0.3, 0.2]),  # pos B
+            np.array([0.6, -0.3, 0.6]),  # left up
 
-            np.array([0.8, 0.0, 0.2]),  # pos A
+            np.array([0.6, -0.3, 0.2]),  # left down
 
-            np.array([0.4, -0.5, 0.2]),  # pos A
-            np.array([0.2, -0.8, 0.2])  # pos C
+            np.array([0.6, 0.3, 0.6]),  # right up
+
+            np.array([0.6, 0.3, 0.2])  # right down
+
         ]
+        # --- Curriculum-by-performance state ---
+        self.pos_count = len(self.cube_positions)
+        self.current_idx = 0  # which position we're currently training
+        self.best_return = np.full(self.pos_count, -np.inf, dtype=np.float32)  # per-position best
+        self.repeat_counter = 0
+
+        # Episode accounting
+        self._episode_active = False
+        self._episode_return = 0.0
+
         self.cube_durations = [2, 1, 1, 1]  # Number of episodes each position lasts
         self.cube_cycle_length = sum(self.cube_durations)
 
@@ -216,30 +228,51 @@ class ReachCubeEgoAudioStackedEnv:
 
     def reset(self) -> torch.Tensor:
         """
-        Reset the envs: reposition the cube according to the hard/easy schedule,
-        re-init the robot, clear history, populate with the first slice,
-        and return the initial stacked obs.
-
-        Hard for `hard_episodes`, then easy for `easy_episodes`, repeating.
+        End the previous episode (if any), update per-position best performance,
+        and choose the next position. A position is repeated until its best
+        return is >= the best of the other positions. Then we advance.
         """
-        self.episode_count += 1
-        # Determine which cube position to use based on current episode
-        idx = (self.episode_count - 1) % self.cube_cycle_length
-        cumulative = 0
-        for i, duration in enumerate(self.cube_durations):
-            cumulative += duration
-            if idx < cumulative:
-                one_pos = self.cube_positions[i].reshape(1, -1)
-                break
+        # --- Close previous episode if one was active ---
+        if self._episode_active:
+            prev_idx = self.current_idx
+            prev_ret = float(self._episode_return)
+            # Update best for the previous position
+            self.best_return[prev_idx] = max(self.best_return[prev_idx], prev_ret)
 
-        # Broadcast across all envs
+            # Best of *other* positions (only those seen at least once)
+            seen_mask = np.isfinite(self.best_return)
+            seen_mask[prev_idx] = False
+            other_best = np.max(self.best_return[seen_mask]) if np.any(seen_mask) else -np.inf
+
+            # Decide whether to repeat or advance
+            if self.best_return[prev_idx] < other_best:
+                # Stay on same position until it catches up
+                decision = "repeat to catch up"
+            else:
+                # Move to next position round-robin
+                self.current_idx = (prev_idx + 1) % self.pos_count
+                decision = "advance"
+
+            # Log decision
+            br = ", ".join([f"{i}:{'%.3f'%v if np.isfinite(v) else '-'}"
+                            for i, v in enumerate(self.best_return)])
+            print(f"[EP end] pos={prev_idx} return={prev_ret:.3f} | best={br} | decision={decision}")
+
+        # --- Start new episode ---
+        self.episode_count += 1
+        self._episode_return = 0.0
+        self._episode_active = True
+
+        # Set cube to current position (broadcast across envs)
+        one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
+
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        # Print current cube position
-        print(f"Episode {self.episode_count}: current cube position = {self.current_cube_pos[0]}")
+        print(f"Episode {self.episode_count}: training position idx={self.current_idx} "
+              f"pos={self.current_cube_pos[0]}")
 
         # Reset histories
         self.audio_history.clear()
@@ -260,20 +293,28 @@ class ReachCubeEgoAudioStackedEnv:
         obs = self._build_observation()
         if self.num_envs == 1:
             self._plot_stacked(obs[0, 0])
+
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         return obs, done_array
+
 
 
     def step(self, actions: torch.Tensor):
         """
         Apply the discrete action, step the sim, update histories,
         optionally play the full stacked audio window, and compute rewards.
+        Also accumulates per-episode return for performance-based scheduling.
         """
         # Move end-effector by fixed deltas
         deltas = torch.tensor([
-            [0.05, 0, 0], [-0.05, 0, 0], [0, 0.05, 0],
-            [0, -0.05, 0], [0, 0, 0.05], [0, 0, -0.05]
+            [0.05, 0, 0],   # +x
+            [-0.05, 0, 0],  # -x
+            [0, 0.05, 0],   # +y
+            [0, -0.05, 0],  # -y
+            [0, 0, 0.05],   # +z
+            [0, 0, -0.05],  # -z
         ], device=self.device)
+
         masks = [actions == i for i in range(self.action_space)]
         self.pos += sum(deltas[i] * masks[i].unsqueeze(1) for i in range(self.action_space))
 
@@ -285,31 +326,37 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
-        # Collect new slice (no immediate slice playback)
+        # Collect new spectrogram slice
         new_slice = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(new_slice)
 
-        # Play the full stacked audio window at intervals
+        # Optionally play the stacked audio buffer at intervals
         if self.num_envs == 1 and (self.step_count % self.show_every == 0):
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
             sd.play(full_buffer, 22050)
             sd.wait()
 
-        # Build observation and optionally visualize
+        # Build stacked observation
         obs = self._build_observation()
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
 
-        # Compute reward based on distance to cube
+        # --- Reward: negative distance exponential ---
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube_pos = self.cube.get_pos()
         dist = torch.norm((left + right) / 2 - cube_pos, dim=1)
         rewards = torch.clamp(torch.exp(-4 * (dist)), 0.0, 1.0)
+
+        # Track return (mean across envs each step)
+        self._episode_return += rewards.mean().item()
+
+        # No early termination
         dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, rewards, dones
+
 
     def _plot_stacked(self, data: torch.Tensor):
         """

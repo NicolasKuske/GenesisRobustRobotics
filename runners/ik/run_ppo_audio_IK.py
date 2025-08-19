@@ -128,11 +128,10 @@ def inference_ppo(args):
         vis=args.vis,
         device=args.device,
         num_envs=args.num_envs,
-        episodes_per_position=1,  # sample new cube pos each episode
         noise_config={"audio_noise_level": args.audio_noise_level}
     )
 
-    # Optional: allow full X-range during inference (if curriculum exists)
+    # Optional: unlock any curriculum limits
     if hasattr(env, "max_stages"):
         env.x_stage = env.max_stages
 
@@ -144,12 +143,18 @@ def inference_ppo(args):
         num_envs=args.num_envs,
         checkpoint_path=args.checkpoint_path
     )
-    agent.eval_mode(True)  # freeze dropout/bn and avoid training-time behavior
+    agent.eval_mode(True)
 
     writer = SummaryWriter(log_dir=f"runs/{args.task}_inference")
 
-    # Greedy by default; change to False for stochastic eval
     deterministic = True
+    N = args.num_envs
+    MAX_STEPS = 100
+
+    # Accumulators across all episodes (per-env)
+    total_successes = torch.zeros(N, dtype=torch.long)
+    total_steps_to_success = torch.zeros(N, dtype=torch.long)
+    total_rewards = torch.zeros(N, dtype=torch.float32)
 
     for ep in range(args.num_episodes):
         state, _ = env.reset()
@@ -158,9 +163,11 @@ def inference_ppo(args):
             break
 
         steps = 0
-        total_reward = torch.zeros(args.num_envs, device=args.device)
+        ep_reward = torch.zeros(N, dtype=torch.float32)
+        reached = torch.zeros(N, dtype=torch.bool)       # whether each env reached 20cm
+        steps_to_success = torch.zeros(N, dtype=torch.long)
 
-        while steps < 200:
+        while steps < MAX_STEPS:
             action = agent.act(state, deterministic=deterministic)
             next_state, reward, done = env.step(action)
 
@@ -168,20 +175,67 @@ def inference_ppo(args):
                 print("[INFO] Environment returned None during step, stopping current episode.")
                 break
 
-            total_reward += reward.to(args.device)
-            state = next_state
+            ep_reward += reward.cpu()
             steps += 1
 
-            # stop early if all envs solved
-            if done.all():
+            # Newly reached envs record their steps-to-20cm at the first time they reach it
+            newly = (~reached) & done.cpu()
+            if newly.any():
+                steps_to_success[newly] = steps
+            reached |= done.cpu()
+
+            state = next_state
+
+            # Stop early if all envs reached 20cm
+            if reached.all():
                 break
 
-        mean_reward = total_reward.mean().item()
+        # Episode accounting
+        total_rewards += ep_reward
+        total_successes += reached.long()
+        total_steps_to_success += steps_to_success * reached.long()  # only add for successes
+
+        # Per-episode logging/printing
+        mean_reward = ep_reward.mean().item()
         writer.add_scalar('Inference/MeanReward', mean_reward, ep)
-        writer.add_scalar('Inference/Steps', steps, ep)
-        print(f"[Inference {ep+1}/{args.num_episodes}] Steps: {steps}, Mean Reward: {mean_reward:.3f}")
+        writer.add_scalar('Inference/StepsExecuted', steps, ep)
+
+        if reached.any():
+            avg_steps_this_ep = steps_to_success[reached].float().mean().item()
+            print(
+                f"[Inference {ep+1}/{args.num_episodes}] "
+                f"Steps executed: {steps}, "
+                f"Mean Reward: {mean_reward:.3f}, "
+                f"Success envs: {reached.sum().item()}/{N}, "
+                f"Avg steps-to-20cm (successful envs): {avg_steps_this_ep:.1f}"
+            )
+        else:
+            print(
+                f"[Inference {ep+1}/{args.num_episodes}] "
+                f"Steps executed: {steps}, "
+                f"Mean Reward: {mean_reward:.3f}, "
+                f"Success envs: 0/{N} (no reach within 20cm)"
+            )
 
     writer.close()
+
+    # --- Final summary across all episodes ---
+    successes_total = int(total_successes.sum().item())
+    attempts_total = N * args.num_episodes
+    success_rate = successes_total / attempts_total if attempts_total > 0 else 0.0
+
+    if successes_total > 0:
+        avg_steps_over_successes = (total_steps_to_success.sum().item() / successes_total)
+    else:
+        avg_steps_over_successes = float('nan')
+
+    avg_reward_per_env = (total_rewards / max(args.num_episodes, 1)).mean().item()
+
+    print("\n=== Inference Summary ===")
+    print(f"Episodes: {args.num_episodes} | Envs: {N} | Attempts: {attempts_total}")
+    print(f"Reached 20cm: {successes_total}/{attempts_total} ({success_rate*100:.1f}%)")
+    print(f"Avg steps-to-20cm over all successes: {avg_steps_over_successes:.1f}")
+    print(f"Mean reward per env (averaged over episodes): {avg_reward_per_env:.3f}")
 
 
 
@@ -195,7 +249,8 @@ def arg_parser():
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
     p.add_argument("--audio_noise_level", type=float, default=0.0, help="Level of audio noise")
     p.add_argument("-m", "--mode", choices=['train', 'inference'], default='train', help="Run mode")
-    p.add_argument("--num_episodes", type=int, default=10, help="Episodes for inference mode")
+    # --- CHANGED default from 10 -> 100 ---
+    p.add_argument("--num_episodes", type=int, default=100, help="Episodes for inference mode")
     return p.parse_args()
 
 def main():
