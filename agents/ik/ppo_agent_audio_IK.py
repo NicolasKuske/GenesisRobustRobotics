@@ -131,7 +131,7 @@ class PPOAgentAudio:
             for start in range(0, T * N, self.batch_size):
                 mb = idxs[start:start + self.batch_size]
                 logits, values = self.model(states[mb])
-                dist = Categorical(torch.softmax(logits, dim=-1))
+                dist = Categorical(logits=logits)  # keep consistent with select_action()
                 new_logp = dist.log_prob(actions[mb])
                 entropy = dist.entropy().mean()
 
