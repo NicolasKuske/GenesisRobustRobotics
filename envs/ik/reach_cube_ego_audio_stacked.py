@@ -231,90 +231,104 @@ class ReachCubeEgoAudioStackedEnv:
 
     def reset(self) -> torch.Tensor:
         """
-        Scheduler rule:
-        - Repeat the current position until its current episode return > min(last-run of the other positions).
-        - After 5 consecutive repeats, sweep all other positions once to refresh their last-run values,
-          then return to the target position and continue as above.
+        Modes:
+          - NORMAL: repeat current idx until current_return > min(last_return of others).
+                    After 5 consecutive repeats, enter SWEEP mode.
+          - SWEEP:  visit each other idx exactly once to refresh last_return, then return to target.
         """
-        # --- lazy init for scheduler state ---
+        # ----- Lazy init for scheduler state (safe if already defined in __init__) -----
+        if not hasattr(self, "pos_count"):
+            self.pos_count = len(self.cube_positions)
+        if not hasattr(self, "current_idx"):
+            self.current_idx = 0
         if not hasattr(self, "last_return"):
-            self.last_return = np.full(self.pos_count, -np.inf, dtype=np.float32)  # per-position last-run return
+            self.last_return = np.full(self.pos_count, -np.inf, dtype=np.float32)
         if not hasattr(self, "advance_margin"):
-            self.advance_margin = 0.0  # require strictly better than min(other); use <0 to allow small shortfall
+            # require strictly greater than lowest-other; set negative to allow a shortfall margin
+            self.advance_margin = 0.0
         if not hasattr(self, "repeat_streak"):
-            self.repeat_streak = 0  # consecutive repeats on the same index
-        if not hasattr(self, "sweep_queue"):
-            self.sweep_queue = []  # indices to visit once during refresh sweep
-        if not hasattr(self, "pending_return_to_idx"):
-            self.pending_return_to_idx = None  # the index we return to after a sweep
+            self.repeat_streak = 0
+        if not hasattr(self, "_mode"):
+            self._mode = "NORMAL"  # "NORMAL" or "SWEEP"
+        if not hasattr(self, "_sweep_targets"):
+            self._sweep_targets = []  # list of indices to visit during sweep
+        if not hasattr(self, "_sweep_i"):
+            self._sweep_i = 0
+        if not hasattr(self, "_sweep_target_idx"):
+            self._sweep_target_idx = None  # the original idx we return to after sweep
+        if not hasattr(self, "_episode_active"):
+            self._episode_active = False
+        if not hasattr(self, "_episode_return"):
+            self._episode_return = 0.0
 
-        # --- close previous episode if active: update last-run and decide next index ---
+        # ----- Close previous episode (if active) -----
         if self._episode_active:
             prev_idx = self.current_idx
             prev_ret = float(self._episode_return)
-
-            # update last-run table
             self.last_return[prev_idx] = prev_ret
 
-            decision = "advance"  # default label; may be overwritten below
-
-            if self.sweep_queue:
-                # We're in a refresh sweep: just go to the next queued index
-                if len(self.sweep_queue) > 0:
-                    self.current_idx = self.sweep_queue.pop(0)
-                    decision = f"sweep→idx={self.current_idx} (remaining {len(self.sweep_queue)})"
-                if len(self.sweep_queue) == 0 and self.pending_return_to_idx is not None:
-                    # After finishing the sweep, return to the target index
-                    self.current_idx = self.pending_return_to_idx
-                    self.pending_return_to_idx = None
+            if self._mode == "SWEEP":
+                # Keep sweeping through all remaining targets
+                if self._sweep_i < len(self._sweep_targets):
+                    self.current_idx = self._sweep_targets[self._sweep_i]
+                    self._sweep_i += 1
+                    decision = f"sweep→idx={self.current_idx} ({self._sweep_i}/{len(self._sweep_targets)})"
+                else:
+                    # Finished sweep: go back to original target and reset streak
+                    self.current_idx = self._sweep_target_idx
+                    self._mode = "NORMAL"
+                    self._sweep_targets = []
+                    self._sweep_i = 0
+                    self._sweep_target_idx = None
+                    self.repeat_streak = 0  # IMPORTANT: reset streak on return
                     decision = "return_to_target_after_sweep"
-                    # Do not change repeat_streak here; we resume evaluation next episode
             else:
-                # Normal rule: compare to the lowest last-run among the other positions
+                # NORMAL mode: compare vs lowest of others' last-run returns
                 idxs = np.arange(self.pos_count)
                 others_mask = idxs != prev_idx
                 seen_others = np.isfinite(self.last_return) & others_mask
                 other_min = np.min(self.last_return[seen_others]) if np.any(seen_others) else -np.inf
 
                 if prev_ret > (other_min + self.advance_margin):
-                    # good enough → advance round-robin
+                    # Good enough → advance round-robin
                     self.current_idx = (prev_idx + 1) % self.pos_count
                     self.repeat_streak = 0
                     decision = "advance"
                 else:
-                    # repeat current index
+                    # Repeat current
                     self.current_idx = prev_idx
                     self.repeat_streak += 1
-                    decision = f"repeat ({self.repeat_streak})"
-
-                    # If we've repeated 5 times, start a one-pass sweep of the other indices
                     if self.repeat_streak >= 5:
-                        self.sweep_queue = [int(i) for i in idxs if i != prev_idx]
-                        self.pending_return_to_idx = prev_idx
-                        self.current_idx = self.sweep_queue.pop(0)  # go to first sweep index now
-                        decision = f"start_sweep→idx={self.current_idx} (remaining {len(self.sweep_queue)})"
-                        # We intentionally keep repeat_streak as-is; it will resume after we return
+                        # Enter SWEEP: visit all *other* indices exactly once
+                        self._mode = "SWEEP"
+                        self._sweep_target_idx = prev_idx
+                        self._sweep_targets = [int(i) for i in idxs if i != prev_idx]
+                        self._sweep_i = 0
+                        # Jump immediately to first sweep target
+                        self.current_idx = self._sweep_targets[self._sweep_i]
+                        self._sweep_i += 1
+                        decision = f"start_sweep→idx={self.current_idx} (1/{len(self._sweep_targets)})"
+                    else:
+                        decision = f"repeat ({self.repeat_streak})"
 
-            # log status
+            # Log (compute others_min w.r.t. prev_idx for transparency)
+            idxs = np.arange(self.pos_count)
+            others_mask = idxs != prev_idx
+            seen_others = np.isfinite(self.last_return) & others_mask
+            others_min_val = np.min(self.last_return[seen_others]) if np.any(seen_others) else -np.inf
             lr = ", ".join([f"{i}:{'%.3f' % v if np.isfinite(v) else '-'}" for i, v in enumerate(self.last_return)])
-            if 'other_min' not in locals():
-                # compute for logging when in sweep/return paths
-                idxs = np.arange(self.pos_count)
-                others_mask = idxs != prev_idx
-                seen_others = np.isfinite(self.last_return) & others_mask
-                other_min = np.min(self.last_return[seen_others]) if np.any(seen_others) else -np.inf
             print(
                 f"[EP end] pos={prev_idx} return={prev_ret:.3f} | last={lr} "
-                f"| others_min={'%.3f' % other_min if np.isfinite(other_min) else '-'} "
+                f"| others_min={'%.3f' % others_min_val if np.isfinite(others_min_val) else '-'} "
                 f"| decision={decision}"
             )
 
-        # --- start new episode ---
+        # ----- Start new episode -----
         self.episode_count += 1
         self._episode_return = 0.0
         self._episode_active = True
 
-        # broadcast cube pos across envs
+        # Broadcast cube pos across envs
         one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
         self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
 
@@ -324,11 +338,10 @@ class ReachCubeEgoAudioStackedEnv:
 
         print(f"Episode {self.episode_count}: training position idx={self.current_idx} pos={self.current_cube_pos[0]}")
 
-        # reset histories
+        # Reset histories + prime with first slice
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
-        # first slice
         first_spec = self._collect_spectrograms(play_audio=False)
         first_raw = self.raw_audio_history[-1].copy()
 
@@ -338,7 +351,6 @@ class ReachCubeEgoAudioStackedEnv:
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
-        # build obs and (single-env) plot
         obs = self._build_observation()
         if self.num_envs == 1 and self._fig is not None:
             self._plot_stacked(obs[0, 0])
