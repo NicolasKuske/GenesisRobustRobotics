@@ -133,9 +133,9 @@ class ReachCubeEgoAudioStackedEnv:
 
     def _sample_cube_positions(self, n: int) -> np.ndarray:
         """Sample n independent cube positions in workspace bounds."""
-        x = np.random.uniform(0.4, 0.8, size=(n, 1))
-        y = np.random.uniform(-0.4, -0.8, size=(n, 1))
-        z = np.random.uniform(0.1, 0.8, size=(n, 1))
+        x = np.random.uniform(0.3, 0.6, size=(n, 1))
+        y = np.random.uniform(-0.3, -0.6, size=(n, 1))
+        z = np.random.uniform(0.1, 0.7, size=(n, 1))
         return np.concatenate([x,y, z], axis=1)
 
     def simulate_audio(self, dist: float) -> np.ndarray:
