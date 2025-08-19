@@ -47,8 +47,12 @@ class ReachCubeEgoAudioStackedEnv:
         self.same_pos_across_envs = True  # <- NEW: toggle shared-position per episode
 
         # --- stick-with-position-until-reward gating ---
-        self.stick_pos_reward_threshold = 2.0   # <- new: threshold to allow resampling
+        self.stick_pos_reward_threshold = 1.5   # <- new: threshold to allow resampling
         self._resample_next = True              # <- new: first episode should sample
+        # counter to avoid getting stuck forever on one position
+        self.stick_counter = 0
+        self.max_stick_repeats = 10
+
 
 
         self.history_length = history_length
@@ -271,6 +275,9 @@ class ReachCubeEgoAudioStackedEnv:
         obs = self._build_observation()
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+        # 👇 New line: print current cube position of env 0
+        print(f"[Episode {self.episode_count}] Current cube pos (env 0): {self.current_cube_pos[0]}")
+
         return obs, done_array
 
     def step(self, actions: torch.Tensor):
@@ -373,8 +380,18 @@ class ReachCubeEgoAudioStackedEnv:
         total = self.episode_reward
         print(f"[Episode {self.episode_count}] Shaping: {shaping:.4f}, Bonus: {bonus:.4f}, Total: {total:.4f}")
 
-        # NEW: allow new position next episode only if last total reward > threshold
-        self._resample_next = (total > self.stick_pos_reward_threshold)
+        # NEW: allow new position next episode if last total reward > threshold
+        if total > self.stick_pos_reward_threshold:
+            self._resample_next = True
+            self.stick_counter = 0  # reset counter
+        else:
+            self.stick_counter += 1
+            if self.stick_counter >= self.max_stick_repeats:
+                print(f"[INFO] Max stick repeats ({self.max_stick_repeats}) reached → forcing resample.")
+                self._resample_next = True
+                self.stick_counter = 0
+            else:
+                self._resample_next = False
 
         self.last_rewards.append(total)
         if len(self.last_rewards) == self.window_size:
@@ -383,6 +400,7 @@ class ReachCubeEgoAudioStackedEnv:
             print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thr:.4f}")
             if mean_r > thr:
                 self._advance_stage()
+
 
 
     def _advance_stage(self):
