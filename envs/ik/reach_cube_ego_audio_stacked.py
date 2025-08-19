@@ -46,6 +46,11 @@ class ReachCubeEgoAudioStackedEnv:
         self.show_every = show_every
         self.same_pos_across_envs = True  # <- NEW: toggle shared-position per episode
 
+        # --- stick-with-position-until-reward gating ---
+        self.stick_pos_reward_threshold = 2.0   # <- new: threshold to allow resampling
+        self._resample_next = True              # <- new: first episode should sample
+
+
         self.history_length = history_length
         self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]
         self.audio_history = deque(maxlen=self.history_length)
@@ -224,52 +229,49 @@ class ReachCubeEgoAudioStackedEnv:
         return stacked.unsqueeze(1)
 
     def reset(self):
+        # Close out previous episode (logs, curriculum stats, etc.)
         if self.episode_count > 0:
             self._process_episode_end()
         self.episode_count += 1
 
-        if (self.episode_count - 1) % self.episodes_per_position == 0:
+        # (Re)sample a new cube position only if allowed (first episode or last total > threshold)
+        if getattr(self, "_resample_next", True) or self.episode_count == 1:
             self.current_cube_pos = self._sample_cube_pos()
             if self.same_pos_across_envs:
-                # tile the first sampled position to all envs for this whole episode
+                # Tile the sampled position across all envs for this episode
                 self.current_cube_pos = np.repeat(self.current_cube_pos[:1], self.num_envs, axis=0)
+        # else: keep self.current_cube_pos unchanged (stick with it)
 
+        # Reset robot and place cube
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
+        # Reset episode accumulators
         self.sum_delta.zero_()
         self.sum_success.zero_()
         self.episode_reward = 0.0
 
+        # Prime audio/spectrogram history buffers
         first_spec = self._collect_spectrograms(play_audio=False)
-        first_raw = self.raw_audio_history[-1].copy()
+        first_raw = self.raw_audio_history[-1].copy()  # last appended is from listen_idx
         self.audio_history.clear()
         self.raw_audio_history.clear()
         for _ in range(self.history_length):
             self.audio_history.append(first_spec.clone())
             self.raw_audio_history.append(first_raw.copy())
 
+        # Set prev_dist for shaping
         left = self.franka.get_link("left_finger").get_pos()
         right = self.franka.get_link("right_finger").get_pos()
         cube = self.cube.get_pos()
         self.prev_dist = torch.norm((left + right) / 2 - cube, dim=1)
 
+        # Build initial observation + done flags
         obs = self._build_observation()
-
-        # **CHANGE HERE**: Gripper XYZ position instead of joints
-        #gripper_pos = ((left + right) / 2).clone()
-
-        #gripper_pos_history = deque([gripper_pos.clone() for _ in range(self.history_length)],
-                                    #maxlen=self.history_length)
-        #self.gripper_pos_history = gripper_pos_history
-
-        #stacked_gripper_pos = torch.stack(list(self.gripper_pos_history), dim=1).reshape(self.num_envs, -1)
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, done_array
-
-        #return obs, done_array
 
     def step(self, actions: torch.Tensor):
         deltas = torch.tensor([
@@ -371,6 +373,9 @@ class ReachCubeEgoAudioStackedEnv:
         total = self.episode_reward
         print(f"[Episode {self.episode_count}] Shaping: {shaping:.4f}, Bonus: {bonus:.4f}, Total: {total:.4f}")
 
+        # NEW: allow new position next episode only if last total reward > threshold
+        self._resample_next = (total > self.stick_pos_reward_threshold)
+
         self.last_rewards.append(total)
         if len(self.last_rewards) == self.window_size:
             mean_r = sum(self.last_rewards) / self.window_size
@@ -378,6 +383,7 @@ class ReachCubeEgoAudioStackedEnv:
             print(f"[Curriculum] last {self.window_size}-ep mean: {mean_r:.4f}, threshold: {thr:.4f}")
             if mean_r > thr:
                 self._advance_stage()
+
 
     def _advance_stage(self):
         self.x_stage += 1
