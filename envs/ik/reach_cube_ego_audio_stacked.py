@@ -29,7 +29,7 @@ class ReachCubeEgoAudioStackedEnv:
             listen_idx: int = 0,
             show_every: int = 10,
             episodes_per_position: int = 3,
-            reward_thresholds=[2, 3, 3.5, 3.5, 3.5, 3.5, 3.5],
+            reward_thresholds=[3.5, 4, 4.5, 4.5, 4.5, 4.5, 4.5],
             window_size: int = 7,
             success_thresh: float = 0.30,
             success_bonus: float = 0.1,
