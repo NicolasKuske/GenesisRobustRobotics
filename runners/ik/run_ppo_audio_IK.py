@@ -160,7 +160,7 @@ def inference_ppo(args):
         steps = 0
         total_reward = torch.zeros(args.num_envs, device=args.device)
 
-        while steps < 100:
+        while steps < 200:
             action = agent.act(state, deterministic=deterministic)
             next_state, reward, done = env.step(action)
 

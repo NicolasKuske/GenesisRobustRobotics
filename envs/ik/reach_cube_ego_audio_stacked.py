@@ -31,7 +31,7 @@ class ReachCubeEgoAudioStackedEnv:
             episodes_per_position: int = 1,
             history_length: int = 25,
             reward_thresholds=None,
-            window_size: int = 4,
+            window_size: int = 1,
             success_thresh: float = 0.30,
             success_bonus: float = 0.1,
             shaping_coef: float = 10.0,
