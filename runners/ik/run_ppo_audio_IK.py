@@ -85,7 +85,7 @@ def run(env, agent, args, writer):
             state = next_state
 
             # ---- EARLY STOP WHEN ANY ENV HITS ----
-            if done.any():
+            if done.all():
                 # stop collecting immediately; train on the partial rollout
                 break
 
