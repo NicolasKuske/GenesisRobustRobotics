@@ -1,4 +1,4 @@
-#envs/ik/reach_cube_ego_audio_stacked_IK.py
+#envs/ik/reach_cube_ego_audio_stacked_IKsimple.py
 
 
 import numpy as np
@@ -44,8 +44,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.listen_idx = listen_idx
         self.show_every = show_every
         # inside __init__
-        self.success_thresh = 0.001  # meters
-
+        self.success_thresh = 0.20  # meters
         self.report_success_as_done = True
         self.inference_mode = inference_mode
 
@@ -104,15 +103,6 @@ class ReachCubeEgoAudioStackedEnv:
         self.episode_count = 0
         self.current_cube_pos = None
 
-        # === Parallel position sampling + anti-collapse scheduler ===
-        self.pos_probs = np.ones(self.pos_count, dtype=np.float32) / self.pos_count  # start uniform
-        self.env_pos_idx = np.zeros(self.num_envs, dtype=np.int64)  # filled on reset()
-
-        # Per-episode accounting per env (used only for probability update)
-        self._episode_return_per_env = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self._done_mask_episode = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
-
 
     def _build_scene(self, show_viewer: bool):
         """Set up the Genesis scene, ground plane, robot, and cube."""
@@ -144,31 +134,6 @@ class ReachCubeEgoAudioStackedEnv:
         # Build multiple copies if needed
         self.scene.build(n_envs=self.num_envs, env_spacing=(5.0, 5.0))
         self.envs_idx = np.arange(self.num_envs)
-
-    def _anti_collapse_probs(self, per_pos_returns: np.ndarray) -> np.ndarray:
-        """
-        Reverse-rank mapping:
-          - Compute normalized returns p_i = R_i / sum(R)
-          - Sort positions by return (low -> high)
-          - Assign probabilities in reversed order (low gets highest, high gets lowest)
-          - Ties: stable mergesort ensures a deterministic order; reversing flips them.
-        """
-        R = np.maximum(per_pos_returns.astype(np.float64), 0.0)
-        S = R.sum()
-        if not np.isfinite(S) or S <= 0.0:
-            return np.ones(self.pos_count, dtype=np.float64) / self.pos_count
-
-        p = R / S
-        order_low_to_high = np.argsort(R, kind='mergesort')            # indices sorted by R ascending
-        p_sorted_high_to_low = np.sort(p)[::-1]                        # values (not indices) high -> low
-
-        q = np.empty_like(p)
-        # positions with lowest R get the largest probability, etc.
-        q[order_low_to_high] = p_sorted_high_to_low
-        q = q / q.sum()  # numerical hygiene
-        return q.astype(np.float32)
-
-
 
     def _init_robot(self):
         """Reset the Franka robot to a neutral pose in all environments."""
@@ -270,15 +235,14 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
-
-
     def reset(self) -> torch.Tensor:
         """
         Reset environment and start a new episode.
 
         Modes:
-          - INFERENCE (self.inference_mode=True): cycle deterministically through positions.
-          - TRAINING (default): parallel sampling per env + anti-collapse probability update.
+          - INFERENCE (self.inference_mode=True): cycle deterministically through
+            all cube positions (0 -> 1 -> 2 -> 3 -> 0 ...), ignoring curriculum.
+          - TRAINING (default): performance-based scheduler (NORMAL / SWEEP).
         """
         # ====================================================
         # Inference mode: cycle positions deterministically
@@ -288,12 +252,15 @@ class ReachCubeEgoAudioStackedEnv:
             self._episode_return = 0.0
             self._episode_active = True
 
+            # Cycle deterministically
             if not hasattr(self, "_infer_cycle_idx"):
                 self._infer_cycle_idx = 0
             else:
                 self._infer_cycle_idx = (self._infer_cycle_idx + 1) % self.pos_count
 
             self.current_idx = self._infer_cycle_idx
+
+            # Broadcast cube pos across envs
             one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
             self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
 
@@ -302,11 +269,13 @@ class ReachCubeEgoAudioStackedEnv:
             self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
             self.scene.step()
 
-            print(f"[Inference] Episode {self.episode_count}: pos idx={self.current_idx} pos={self.current_cube_pos[0]}")
+            print(
+                f"[Inference] Episode {self.episode_count}: pos idx={self.current_idx} pos={self.current_cube_pos[0]}")
 
-            # Reset histories + prime
+            # Reset histories + prime with first slice to fill history_length
             self.audio_history.clear()
             self.raw_audio_history.clear()
+
             first_spec = self._collect_spectrograms(play_audio=False)
             first_raw = self.raw_audio_history[-1].copy()
 
@@ -324,45 +293,101 @@ class ReachCubeEgoAudioStackedEnv:
             return obs, done_array
 
         # ====================================================
-        # Training mode: PARALLEL sampling + anti-collapse
+        # Training mode: curriculum scheduler
         # ====================================================
 
-        # If we are closing a previous episode, update next-episode probabilities
-        if getattr(self, "_episode_active", False):
-            # Aggregate per-position returns from last episode
-            per_env = self._episode_return_per_env.detach().cpu().numpy()
-            per_pos_returns = np.zeros(self.pos_count, dtype=np.float64)
-            for i in range(self.pos_count):
-                per_pos_returns[i] = per_env[self.env_pos_idx == i].sum()
+        # Lazy init (safe if already defined in __init__)
+        if not hasattr(self, "pos_count"):
+            self.pos_count = len(self.cube_positions)
+        if not hasattr(self, "current_idx"):
+            self.current_idx = 0
+        if not hasattr(self, "last_return"):
+            self.last_return = np.full(self.pos_count, -np.inf, dtype=np.float32)
+        if not hasattr(self, "advance_margin"):
+            self.advance_margin = 0.0  # require strictly greater than lowest-other
+        if not hasattr(self, "repeat_streak"):
+            self.repeat_streak = 0
+        if not hasattr(self, "_mode"):
+            self._mode = "NORMAL"  # "NORMAL" or "SWEEP"
+        if not hasattr(self, "_sweep_targets"):
+            self._sweep_targets = []  # indices to visit in SWEEP
+        if not hasattr(self, "_sweep_i"):
+            self._sweep_i = 0
+        if not hasattr(self, "_sweep_target_idx"):
+            self._sweep_target_idx = None
+        if not hasattr(self, "_episode_active"):
+            self._episode_active = False
+        if not hasattr(self, "_episode_return"):
+            self._episode_return = 0.0
 
-            # Compute next distribution (reverse-rank)
-            self.pos_probs = self._anti_collapse_probs(per_pos_returns)
+        # Close previous episode (if active): update scheduler state
+        if self._episode_active:
+            prev_idx = self.current_idx
+            prev_ret = float(self._episode_return)
+            self.last_return[prev_idx] = prev_ret
 
-            # Debug info
-            counts = np.bincount(self.env_pos_idx, minlength=self.pos_count)
-            pr = np.round(per_pos_returns, 3).tolist()
-            pp = np.round(self.pos_probs, 3).tolist()
-            print(f"[EP end] per-pos return={pr} | assignment_counts={counts.tolist()} | next p={pp}")
+            if self._mode == "SWEEP":
+                if self._sweep_i < len(self._sweep_targets):
+                    self.current_idx = self._sweep_targets[self._sweep_i]
+                    self._sweep_i += 1
+                    decision = f"sweep→idx={self.current_idx} ({self._sweep_i}/{len(self._sweep_targets)})"
+                else:
+                    self.current_idx = self._sweep_target_idx
+                    self._mode = "NORMAL"
+                    self._sweep_targets = []
+                    self._sweep_i = 0
+                    self._sweep_target_idx = None
+                    self.repeat_streak = 0
+                    decision = "return_to_target_after_sweep"
+            else:
+                idxs = np.arange(self.pos_count)
+                others_mask = idxs != prev_idx
+                seen_others = np.isfinite(self.last_return) & others_mask
+                other_min = np.min(self.last_return[seen_others]) if np.any(seen_others) else -np.inf
 
-        # Start a new episode
+                if prev_ret > (other_min + self.advance_margin):
+                    self.current_idx = (prev_idx + 1) % self.pos_count
+                    self.repeat_streak = 0
+                    decision = "advance"
+                else:
+                    self.current_idx = prev_idx
+                    self.repeat_streak += 1
+                    if self.repeat_streak >= 5:
+                        self._mode = "SWEEP"
+                        self._sweep_target_idx = prev_idx
+                        self._sweep_targets = [int(i) for i in idxs if i != prev_idx]
+                        self._sweep_i = 0
+                        self.current_idx = self._sweep_targets[self._sweep_i]
+                        self._sweep_i += 1
+                        decision = f"start_sweep→idx={self.current_idx} (1/{len(self._sweep_targets)})"
+                    else:
+                        decision = f"repeat ({self.repeat_streak})"
+
+            idxs = np.arange(self.pos_count)
+            others_mask = idxs != prev_idx
+            seen_others = np.isfinite(self.last_return) & others_mask
+            others_min_val = np.min(self.last_return[seen_others]) if np.any(seen_others) else -np.inf
+            lr = ", ".join([f"{i}:{'%.3f' % v if np.isfinite(v) else '-'}" for i, v in enumerate(self.last_return)])
+            print(
+                f"[EP end] pos={prev_idx} return={prev_ret:.3f} | last={lr} "
+                f"| others_min={'%.3f' % others_min_val if np.isfinite(others_min_val) else '-'} "
+                f"| decision={decision}"
+            )
+
+        # Start new episode (training mode)
         self.episode_count += 1
-        self._episode_active = True
         self._episode_return = 0.0
-        self._episode_return_per_env.zero_()
-        self._done_mask_episode.zero_()
+        self._episode_active = True
 
-        # First episode: uniform (already set). Thereafter: anti-collapse p from above.
-        self.env_pos_idx = np.random.choice(self.pos_count, size=self.num_envs, p=self.pos_probs)
-        self.current_cube_pos = np.stack([self.cube_positions[i] for i in self.env_pos_idx], axis=0)
+        one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
+        self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
 
-        # Reset robot & place cube per env
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        print(f"Episode {self.episode_count}: parallel sampling — pos_probs={np.round(self.pos_probs, 3).tolist()}")
+        print(f"Episode {self.episode_count}: training position idx={self.current_idx} pos={self.current_cube_pos[0]}")
 
-        # Reset histories + prime
         self.audio_history.clear()
         self.raw_audio_history.clear()
 
@@ -386,16 +411,11 @@ class ReachCubeEgoAudioStackedEnv:
         """
         Discrete Cartesian moves, audio/spectrogram update, reward, and done flags.
 
-        Notes:
-          - success @ <= self.success_thresh meters: +20 bonus and done=True (per-env)
-          - base reward: exp(-4*dist), clamped to [0, 1]
-          - per-env episode return is accumulated only until that env's first success
-            (so post-success steps don't bias the next-episode position probabilities)
+        Changes:
+          - success @ <= 0.20 m: +20 bonus and done=True (per-env)
+          - base reward kept (exp(-4*dist))
         """
-        # Ensure actions are 1D int tensor on the right device
-        actions = actions.long().to(self.device).view(-1)  # [num_envs]
-
-        # --- Move end-effector by discrete deltas (vectorized via indexing) ---
+        # --- Move EE by discrete deltas ---
         deltas = torch.tensor([
             [0.05, 0.00, 0.00],  # +x
             [-0.05, 0.00, 0.00],  # -x
@@ -403,10 +423,10 @@ class ReachCubeEgoAudioStackedEnv:
             [0.00, -0.05, 0.00],  # -y
             [0.00, 0.00, 0.05],  # +z
             [0.00, 0.00, -0.05],  # -z
-        ], device=self.device, dtype=self.pos.dtype)  # [6, 3]
+        ], device=self.device)
 
-        step_delta = deltas[actions]  # [num_envs, 3]
-        self.pos = self.pos + step_delta
+        masks = [actions == i for i in range(self.action_space)]
+        self.pos += sum(deltas[i] * masks[i].unsqueeze(1) for i in range(self.action_space))
 
         # IK control to reach the new pose
         qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=self.pos, quat=self.quat)
@@ -415,10 +435,10 @@ class ReachCubeEgoAudioStackedEnv:
         self.scene.step()
 
         # Collect new spectrogram slice and append to history
-        new_slice = self._collect_spectrograms(play_audio=False)  # [num_envs, F, Tslice]
+        new_slice = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(new_slice)
 
-        # Build stacked observation (num_envs, 1, F, Tstack)
+        # Build stacked observation (num_envs, 1, freq_bins, time_bins)
         obs = self._build_observation()
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
@@ -431,23 +451,16 @@ class ReachCubeEgoAudioStackedEnv:
 
         base_reward = torch.clamp(torch.exp(-4 * dist), 0.0, 1.0)
 
-        success_thresh = self.success_thresh
-        report_success = self.report_success_as_done
+        success_thresh = getattr(self, "success_thresh", 0.30)  # meters
+        report_success = getattr(self, "report_success_as_done", True)
 
-        success_mask = (dist <= success_thresh)  # [num_envs] bool
+        success_mask = (dist <= success_thresh)
         bonus = success_mask.float() * 20.0  # +20 on success
-        rewards = (base_reward + bonus).to(self.device)  # [num_envs]
+        rewards = (base_reward + bonus).to(self.device)
 
-        # Accumulate per-episode return *per env* until first success for that env
-        # (include the success step; exclude any steps thereafter)
-        active_mask = (~self._done_mask_episode).float()  # [num_envs]
-        self._episode_return_per_env += rewards * active_mask
-        self._done_mask_episode |= success_mask  # latch done per env for this episode
-
-        # Keep existing mean bookkeeping if used elsewhere
+        # accumulate per-episode return (mean over envs this step)
         self._episode_return += rewards.mean().item()
 
-        # Done flags (per env)
         if report_success:
             dones = success_mask.to(self.device)
         else:
