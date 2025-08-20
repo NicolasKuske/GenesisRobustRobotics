@@ -361,7 +361,7 @@ class ReachCubeEgoVisionStackedEnv:
 
         # Optional display every 100 steps (existing)
         self.step_count += 1
-        if self.num_envs == 1 and self.step_count % 100 == 0:
+        if self.num_envs == 2 and self.step_count % 100 == 0:
             frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
             plt.figure(figsize=(8, 8))
             for i in range(len(self.sample_offsets)):

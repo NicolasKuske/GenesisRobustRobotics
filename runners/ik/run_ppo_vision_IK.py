@@ -1,5 +1,3 @@
-# runners/ik/run_ppo_vision_IK.py
-
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 
@@ -15,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from agents.ik.ppo_agent_vision_IK import PPOAgentVision, RolloutBatch
 from envs import *
 
-# Map task names to env classes (ensure these exist)
+# Map task names to env classes (ensure these exist in envs/__init__.py)
 task_to_class = {
     'ReachCubeVision': ReachCubeVisionEnv,
     'ReachCubeVisionStacked': ReachCubeVisionStackedEnv,
@@ -39,7 +37,7 @@ def train_ppo(args):
 
     agent = PPOAgentVision(
         obs_shape=env.obs_shape,
-        action_dim=env.action_space,     # <-- name matches agent signature
+        action_dim=env.action_space,
         lr=1e-4,
         gamma=0.99,
         lam=0.95,
@@ -59,15 +57,14 @@ def train_ppo(args):
     writer.close()
 
 def run(env, agent, args, writer):
-    T = 100                # max horizon per update (like audio)
+    """Audio-style PPO training loop with GAE and clipping."""
+    T = 100
     N = args.num_envs
     total_steps = 1_000_000
     num_updates = total_steps // (T * N)
 
     for update in range(1, num_updates + 1):
-        # vision reset returns just obs; standardize to (state, dummy_dones)
-        state = env.reset()
-        done_dummy = torch.zeros(N, dtype=torch.bool, device=args.device)
+        state = env.reset()  # [N, C, H, W]
 
         states, actions, log_probs, values, rewards, dones = [], [], [], [], [], []
 
@@ -80,17 +77,14 @@ def run(env, agent, args, writer):
             values.append(val.detach())
 
             next_state, reward, done = env.step(a)
-
             rewards.append(reward.to(agent.device))
             dones.append(done.to(agent.device).float())
 
             state = next_state
-
-            # Optional: early stop if all envs done (if your env ever sets dones True)
             if done.all():
                 break
 
-        # append trailing state and its value for bootstrap
+        # Bootstrap with trailing value
         states.append(state)
         with torch.no_grad():
             _, last_value = agent.model(state.to(agent.device))
@@ -107,7 +101,6 @@ def run(env, agent, args, writer):
 
         agent.train(batch)
 
-        # logging & checkpointing
         ep_reward = batch.rewards.sum(dim=0).mean().item()
         writer.add_scalar('Reward/Mean', ep_reward, update)
         print(f"[Update {update}/{num_updates}] Avg Reward per Env: {ep_reward:.3f} | "
@@ -115,6 +108,116 @@ def run(env, agent, args, writer):
 
         if update % 3 == 0:
             agent.save_checkpoint()
+
+@torch.no_grad()
+def inference_ppo(args):
+    """Deterministic evaluation loop (like audio) with success stats."""
+    env_cls = create_environment(args.task)
+    env = env_cls(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs,
+        noise_config={"visual_noise_level": args.visual_noise_level},
+        inference_mode=True,   # cycle deterministically through curriculum positions
+    )
+
+    agent = PPOAgentVision(
+        obs_shape=env.obs_shape,
+        action_dim=env.action_space,
+        device=args.device,
+        load=True,
+        num_envs=args.num_envs,
+        checkpoint_path=args.checkpoint_path
+    )
+    agent.eval_mode(True)
+
+    writer = SummaryWriter(log_dir=f"runs/{args.task}_inference")
+
+    deterministic = True
+    N = args.num_envs
+    MAX_STEPS = 100
+
+    total_successes = torch.zeros(N, dtype=torch.long)
+    total_steps_to_success = torch.zeros(N, dtype=torch.long)
+    total_rewards = torch.zeros(N, dtype=torch.float32)
+
+    for ep in range(args.num_episodes):
+        state = env.reset()  # [N, C, H, W]
+        if state is None:
+            print("[INFO] Environment returned None on reset, ending inference.")
+            break
+
+        steps = 0
+        ep_reward = torch.zeros(N, dtype=torch.float32)
+        reached = torch.zeros(N, dtype=torch.bool)
+        steps_to_success = torch.zeros(N, dtype=torch.long)
+
+        while steps < MAX_STEPS:
+            action = agent.act(state, deterministic=deterministic)
+            next_state, reward, done = env.step(action)
+
+            if next_state is None:
+                print("[INFO] Environment returned None during step, stopping current episode.")
+                break
+
+            ep_reward += reward.cpu()
+            steps += 1
+
+            newly = (~reached) & done.cpu()
+            if newly.any():
+                steps_to_success[newly] = steps
+            reached |= done.cpu()
+
+            state = next_state
+
+            if reached.all():
+                break
+
+        # Episode accounting
+        total_rewards += ep_reward
+        total_successes += reached.long()
+        total_steps_to_success += steps_to_success * reached.long()
+
+        mean_reward = ep_reward.mean().item()
+        writer.add_scalar('Inference/MeanReward', mean_reward, ep)
+        writer.add_scalar('Inference/StepsExecuted', steps, ep)
+
+        if reached.any():
+            avg_steps_this_ep = steps_to_success[reached].float().mean().item()
+            print(
+                f"[Inference {ep+1}/{args.num_episodes}] "
+                f"Steps executed: {steps}, "
+                f"Mean Reward: {mean_reward:.3f}, "
+                f"Success envs: {reached.sum().item()}/{N}, "
+                f"Avg steps-to-30cm (successful envs): {avg_steps_this_ep:.1f}"
+            )
+        else:
+            print(
+                f"[Inference {ep+1}/{args.num_episodes}] "
+                f"Steps executed: {steps}, "
+                f"Mean Reward: {mean_reward:.3f}, "
+                f"Success envs: 0/{N} (no reach within 30cm)"
+            )
+
+    writer.close()
+
+    # Final summary
+    successes_total = int(total_successes.sum().item())
+    attempts_total = N * args.num_episodes
+    success_rate = successes_total / attempts_total if attempts_total > 0 else 0.0
+
+    if successes_total > 0:
+        avg_steps_over_successes = (total_steps_to_success.sum().item() / successes_total)
+    else:
+        avg_steps_over_successes = float('nan')
+
+    avg_reward_per_env = (total_rewards / max(args.num_episodes, 1)).mean().item()
+
+    print("\n=== Inference Summary ===")
+    print(f"Episodes: {args.num_episodes} | Envs: {N} | Attempts: {attempts_total}")
+    print(f"Reached 30cm: {successes_total}/{attempts_total} ({success_rate*100:.1f}%)")
+    print(f"Avg steps-to-30cm over all successes: {avg_steps_over_successes:.1f}")
+    print(f"Mean reward per env (averaged over episodes): {avg_reward_per_env:.3f}")
 
 def arg_parser():
     p = argparse.ArgumentParser()
@@ -126,12 +229,18 @@ def arg_parser():
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
     p.add_argument("--visual_noise_level", type=float, default=0.0,
                    help="Gaussian noise std-dev added to RGB")
+    p.add_argument("-m", "--mode", choices=['train', 'inference'], default='train',
+                   help="Run mode")
+    p.add_argument("--num_episodes", type=int, default=100,
+                   help="Episodes for inference mode")
     return p.parse_args()
 
 def main():
     args = arg_parser()
 
+    # default checkpoint under logs/
     default_ckpt = f"logs/{args.task}_ppo_checkpoint.pth"
+
     if args.load_path:
         args.load = True
         args.checkpoint_path = default_ckpt if args.load_path == "default" else args.load_path
@@ -141,14 +250,19 @@ def main():
 
     os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
 
-    if args.load and not os.path.isfile(args.checkpoint_path):
-        print(f"[ERROR] Checkpoint not found: {args.checkpoint_path}")
-        sys.exit(1)
+    if args.mode == 'inference':
+        # Require a checkpoint to run inference
+        if not os.path.isfile(args.checkpoint_path):
+            print(f"[ERROR] Checkpoint not found for inference: {args.checkpoint_path}")
+            sys.exit(1)
 
     backend = gs.cpu if args.device.lower().startswith("cpu") else gs.gpu
     gs.init(backend=backend)
 
-    train_ppo(args)
+    if args.mode == 'train':
+        train_ppo(args)
+    else:
+        inference_ppo(args)
 
 if __name__ == "__main__":
     main()
