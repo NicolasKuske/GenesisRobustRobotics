@@ -47,13 +47,6 @@ class ReachCubeEgoAudioStackedEnv:
         self.success_thresh = 0.3001  # meters
         self.success_bonus = 20.0  # default
 
-        # ---- Position jitter (uniform in [-range, +range]) ----
-        self.jitter_enabled = True          # set False to disable quickly
-        self.jitter_range = 0.1             # ±0.1 on each axis
-        self.jitter_shared_across_envs = True  # True: same jitter for all envs this episode; False: per-env
-        # Optional safety clamps (None = no clamp). Example format: ((xmin,xmax),(ymin,ymax),(zmin,zmax))
-        self.jitter_clip = None
-
         self.report_success_as_done = True
         self.inference_mode = inference_mode
 
@@ -184,37 +177,6 @@ class ReachCubeEgoAudioStackedEnv:
             q = q / q.sum()
         return q.astype(np.float32)
 
-    def _apply_jitter(self, base_pos_batch: np.ndarray) -> np.ndarray:
-        """
-        base_pos_batch: (num_envs, 3) numpy array of base positions.
-        Returns jittered positions with uniform noise in [-jitter_range, +jitter_range] per axis.
-        """
-        if not getattr(self, "jitter_enabled", False) or self.jitter_range <= 0:
-            return base_pos_batch
-
-        n, d = base_pos_batch.shape
-        assert d == 3, "Positions must be (N,3)"
-
-        if self.jitter_shared_across_envs:
-            # One 3D jitter, shared across all envs
-            eps = np.random.uniform(-self.jitter_range, self.jitter_range, size=(1, 3))
-            noise = np.repeat(eps, n, axis=0)
-        else:
-            # Independent jitter per env
-            noise = np.random.uniform(-self.jitter_range, self.jitter_range, size=(n, 3))
-
-        jittered = base_pos_batch + noise
-
-        # Optional clamp to workspace bounds if provided
-        if self.jitter_clip is not None:
-            (xmin, xmax), (ymin, ymax), (zmin, zmax) = self.jitter_clip
-            jittered[:, 0] = np.clip(jittered[:, 0], xmin, xmax)
-            jittered[:, 1] = np.clip(jittered[:, 1], ymin, ymax)
-            jittered[:, 2] = np.clip(jittered[:, 2], zmin, zmax)
-
-        return jittered
-
-
     def _init_robot(self):
         """Reset the Franka robot to a neutral pose in all environments."""
         self.motors_dof = torch.arange(7, device=self.device)
@@ -325,49 +287,6 @@ class ReachCubeEgoAudioStackedEnv:
           - INFERENCE (self.inference_mode=True): cycle deterministically through positions.
           - TRAINING (default): parallel sampling per env + anti-collapse probability update.
         """
-
-        # -----------------------------
-        # Jitter helper (self-contained)
-        # -----------------------------
-        def _apply_jitter(base_pos_batch: np.ndarray) -> np.ndarray:
-            """
-            base_pos_batch: (num_envs, 3) numpy array of base positions.
-            Adds uniform noise in [-jitter_range, +jitter_range] per axis.
-            Uses these attributes if present; otherwise falls back to defaults:
-              - jitter_enabled -> True
-              - jitter_range -> 0.1
-              - jitter_shared_across_envs -> True
-              - jitter_clip -> None  (format: ((xmin,xmax),(ymin,ymax),(zmin,zmax)))
-            """
-            enabled = getattr(self, "jitter_enabled", True)
-            if not enabled:
-                return base_pos_batch
-
-            jr = float(getattr(self, "jitter_range", 0.1))
-            if jr <= 0:
-                return base_pos_batch
-
-            shared = bool(getattr(self, "jitter_shared_across_envs", True))
-            n = base_pos_batch.shape[0]
-
-            if shared:
-                eps = np.random.uniform(-jr, jr, size=(1, 3))
-                noise = np.repeat(eps, n, axis=0)
-            else:
-                noise = np.random.uniform(-jr, jr, size=(n, 3))
-
-            jittered = base_pos_batch + noise
-
-            # Optional clamp to workspace bounds
-            clip = getattr(self, "jitter_clip", None)
-            if clip is not None:
-                (xmin, xmax), (ymin, ymax), (zmin, zmax) = clip
-                jittered[:, 0] = np.clip(jittered[:, 0], xmin, xmax)
-                jittered[:, 1] = np.clip(jittered[:, 1], ymin, ymax)
-                jittered[:, 2] = np.clip(jittered[:, 2], zmin, zmax)
-
-            return jittered
-
         # ====================================================
         # Inference mode: cycle positions deterministically
         # ====================================================
@@ -384,9 +303,6 @@ class ReachCubeEgoAudioStackedEnv:
             self.current_idx = self._infer_cycle_idx
             one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
             self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
-
-            # Apply ±0.1 uniform jitter to x,y,z (or according to your attrs)
-            self.current_cube_pos = _apply_jitter(self.current_cube_pos)
 
             # Reset robot & place cube
             self._init_robot()
@@ -446,9 +362,6 @@ class ReachCubeEgoAudioStackedEnv:
         self.env_pos_idx = np.random.choice(self.pos_count, size=self.num_envs, p=self.pos_probs)
         self.current_cube_pos = np.stack([self.cube_positions[i] for i in self.env_pos_idx], axis=0)
 
-        # Apply ±0.1 uniform jitter to x,y,z (or according to your attrs)
-        self.current_cube_pos = _apply_jitter(self.current_cube_pos)
-
         # Reset robot & place cube per env
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
@@ -475,7 +388,6 @@ class ReachCubeEgoAudioStackedEnv:
 
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         return obs, done_array
-
 
     def step(self, actions: torch.Tensor):
         """
