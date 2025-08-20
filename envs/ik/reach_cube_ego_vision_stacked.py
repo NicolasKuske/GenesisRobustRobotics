@@ -130,6 +130,23 @@ class ReachCubeEgoVisionStackedEnv:
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
 
+        # --- NEW: a sphere target (initially parked; we reposition on reset) ---
+        self.sphere = self.scene.add_entity(
+            gs.morphs.Mesh(
+                file="meshes/sphere.obj",
+                scale=0.05,
+                pos=(0.0, 0.0, -1.0) , # initial placeholder
+                collision=False
+            ),
+            surface=gs.surfaces.Rough(color=(0.0, 0.7, 0.0)),
+            material=gs.materials.Rigid(gravity_compensation=1.0)
+        )
+
+        # --- NEW: per-episode random object selection (cube=0, sphere=1) ---
+        self.shape_probs = np.array([0.5, 0.5], dtype=np.float32)   # tweak to bias
+        self.use_sphere_mask = np.zeros(self.num_envs, dtype=bool)  # filled each reset()
+
+
         # Camera setup
         self.cams = []
         self.cam_transform = trans_quat_to_T(
@@ -173,6 +190,28 @@ class ReachCubeEgoVisionStackedEnv:
             link=self.end_effector, pos=self.pos, quat=self.quat
         )
         self.franka.control_dofs_position(qpos[:,:-2], self.motors_dof, self.envs_idx)
+
+
+    def _place_objects_for_current_episode(self):
+        """
+        Places the active object (cube or sphere) at self.current_cube_pos
+        on a per-env basis and 'parks' the inactive one far below the floor.
+        """
+        far = np.array([0.0, 0.0, -100.0], dtype=float)
+
+        cube_pos = self.current_cube_pos.copy()
+        sphere_pos = self.current_cube_pos.copy()
+
+        # Park whichever object is not selected in each env
+        cube_pos[self.use_sphere_mask] = far
+        sphere_pos[~self.use_sphere_mask] = far
+
+        self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
+        self.sphere.set_pos(sphere_pos, envs_idx=self.envs_idx)
+
+        # For logging/debug, keep human-readable labels
+        self._object_kinds = np.where(self.use_sphere_mask, "sphere", "cube")
+
 
     def _render(self):
         imgs = []
@@ -238,6 +277,7 @@ class ReachCubeEgoVisionStackedEnv:
           - INFERENCE: cycle deterministically through positions.
           - TRAINING: update position probabilities from last episode's returns
                       (reverse-rank anti-collapse), then sample positions per env.
+        In both modes, pick ONE shape (cube/sphere) for ALL envs this episode.
         Returns: stacked observation tensor [N, C, H, W].
         """
         # =========================
@@ -255,13 +295,20 @@ class ReachCubeEgoVisionStackedEnv:
             one_pos = self.cube_positions[self._infer_cycle_idx].reshape(1, -1)
             self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
 
-            # Reset robot & place cube
+            # Reset robot
             self._init_robot()
-            self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
+
+            # --- ONE SHAPE FOR ALL ENVS (random per episode) ---
+            use_sphere = (np.random.rand() < self.shape_probs[1])
+            self.use_sphere_mask = np.full(self.num_envs, use_sphere, dtype=bool)
+            self._current_object_kind = "sphere" if use_sphere else "cube"
+
+            # Place active object and park the other
+            self._place_objects_for_current_episode()
             self.scene.step()
 
             print(f"[Inference] Episode {self.episode_count}: pos idx={self._infer_cycle_idx} "
-                  f"pos={self.current_cube_pos[0].tolist()}")
+                  f"pos={self.current_cube_pos[0].tolist()} | object={self._current_object_kind}")
 
             # Histories
             self.image_history.clear()
@@ -309,13 +356,20 @@ class ReachCubeEgoVisionStackedEnv:
         self.env_pos_idx = np.random.choice(self.pos_count, size=self.num_envs, p=self.pos_probs)
         self.current_cube_pos = np.stack([self.cube_positions[i] for i in self.env_pos_idx], axis=0)
 
-        # Reset robot & place cube per env
+        # Reset robot
         self._init_robot()
-        self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
+
+        # --- ONE SHAPE FOR ALL ENVS (random per episode) ---
+        use_sphere = (np.random.rand() < self.shape_probs[1])
+        self.use_sphere_mask = np.full(self.num_envs, use_sphere, dtype=bool)
+        self._current_object_kind = "sphere" if use_sphere else "cube"
+
+        # Place active object and park the other
+        self._place_objects_for_current_episode()
         self.scene.step()
 
         print(f"Episode {self.episode_count}: pos_probs={np.round(self.pos_probs, 3).tolist()} "
-              f"| assigned idx={self.env_pos_idx.tolist()}")
+              f"| assigned idx={self.env_pos_idx.tolist()} | object={self._current_object_kind}")
 
         # --- PRIME STACKED HISTORY ---
         self.image_history.clear()
@@ -373,11 +427,16 @@ class ReachCubeEgoVisionStackedEnv:
             plt.pause(0.1)
             plt.show(block=False)
 
-        # --- Distance & reward (parity with audio env) ---
-        obj_pos = self.cube.get_pos()
+        # --- Distance to the currently active object (cube or sphere) ---
+        cube_pos = self.cube.get_pos()       # [N, 3]
+        sphere_pos = self.sphere.get_pos()   # [N, 3]
+        mask = torch.as_tensor(self.use_sphere_mask, device=self.device, dtype=torch.bool)
+        obj_pos = torch.where(mask.unsqueeze(1), sphere_pos, cube_pos)
+
         gp_l = self.franka.get_link("left_finger").get_pos()
         gp_r = self.franka.get_link("right_finger").get_pos()
         dist = torch.norm(obj_pos - (gp_l + gp_r) / 2, dim=1)  # [N]
+
 
         # NEW: audio-style base reward
         base_reward = torch.clamp(torch.exp(-4 * dist), 0.0, 1.0)
