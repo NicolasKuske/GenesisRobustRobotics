@@ -54,9 +54,19 @@ class ReachCubeEgoAudioStackedEnv:
         self.cube_positions = [
             np.array([0.6, -0.3, 0.6]),  # left up
 
+            np.array([0.6, -0.3, 0.4]),  # left middle
+
             np.array([0.6, -0.3, 0.2]),  # left down
 
+            np.array([0.6, 0.0, 0.6]),  # middle up
+
+            np.array([0.6, 0.0, 0.4]),  # middle middle
+
+            np.array([0.6, 0.0, 0.2]),  # middle down
+
             np.array([0.6, 0.3, 0.6]),  # right up
+
+            np.array([0.6, 0.3, 0.4]),  # right middle
 
             np.array([0.6, 0.3, 0.2])  # right down
 
