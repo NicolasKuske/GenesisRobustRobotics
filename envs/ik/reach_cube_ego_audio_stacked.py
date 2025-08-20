@@ -45,7 +45,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.show_every = show_every
         # inside __init__
         self.success_thresh = 0.3001  # meters
-        self.success_bonus = -20.0  # default
+        self.success_bonus = 20.0  # default
 
         self.report_success_as_done = True
         self.inference_mode = inference_mode
