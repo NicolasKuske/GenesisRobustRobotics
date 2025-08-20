@@ -56,69 +56,67 @@ def train_ppo(args):
 
 
 def run(env, agent, args, writer):
-    T = 100                    # horizon per update (match position runner default)
+    T = 100                 # max horizon per update
     N = args.num_envs
-    total_steps = 1_000_000    # or args.total_timesteps if you add it
+    total_steps = 1_000_000
     num_updates = total_steps // (T * N)
 
     for update in range(1, num_updates + 1):
         state, _ = env.reset()
+
         states, actions, log_probs, values, rewards, dones = [], [], [], [], [], []
 
+        # always start with the current state (for [T+1] stacking later)
+        # we append the trailing state after the loop as well
         for t in range(T):
+            # stash current state for time t
+            states.append(state)
+
             a, logp, ent, val = agent.select_action(state)
-            states.append(state)                       # [N, C, F, Tspec]
             actions.append(a)
             log_probs.append(logp.detach())
             values.append(val.detach())
 
             next_state, reward, done = env.step(a)
 
-            # if env signals curriculum complete (none), break this update cleanly
-            if next_state is None:
-                # bootstrap with zeros
-                rewards.append(torch.zeros_like(reward))
-                dones.append(torch.ones_like(done).float())
-                states.append(state)  # duplicate last state as T+1
-                values.append(val)    # approximate bootstrap
-                break
-
             rewards.append(reward.to(agent.device))
             dones.append(done.to(agent.device).float())
 
-            # optional: per-env early reset
-            if done.all():
-                next_state, _ = env.reset()
-
             state = next_state
 
-        # append last state/value for bootstrap if not added above
-        if len(states) == T:
-            states.append(state)
-            with torch.no_grad():
-                _, last_value = agent.model(state.to(agent.device))
-            values.append(last_value)
-        else:
-            last_value = values[-1]
+            # ---- EARLY STOP WHEN ANY ENV HITS ----
+            if done.any():
+                # stop collecting immediately; train on the partial rollout
+                break
 
+        # append the final state and its value for bootstrap
+        states.append(state)
+        with torch.no_grad():
+            _, last_value = agent.model(state.to(agent.device))
+        values.append(last_value.detach())
+
+        # stack into tensors of shape:
+        # states: [t_len+1, N, 1, F, Tspec], actions/logp/rew/done: [t_len, N]
         batch = RolloutBatch(
-            states=torch.stack(states),           # [T+1, N, 1, F, Tspec]
-            actions=torch.stack(actions),         # [T,   N]
-            log_probs=torch.stack(log_probs),     # [T,   N]
-            values=torch.stack(values),           # [T+1, N]
-            rewards=torch.stack(rewards),         # [T,   N]
-            dones=torch.stack(dones),             # [T,   N]
+            states=torch.stack(states),           # [t_len+1, N, 1, F, Tspec]
+            actions=torch.stack(actions),         # [t_len,   N]
+            log_probs=torch.stack(log_probs),     # [t_len,   N]
+            values=torch.stack(values),           # [t_len+1, N]
+            rewards=torch.stack(rewards),         # [t_len,   N]
+            dones=torch.stack(dones),             # [t_len,   N]
         )
 
         agent.train(batch)
 
-        # logging like position runner
+        # logging
         ep_reward = batch.rewards.sum(dim=0).mean().item()
         writer.add_scalar('Reward/Mean', ep_reward, update)
-        print(f"[Update {update}/{num_updates}] Avg Reward per Env: {ep_reward:.3f}")
+        print(f"[Update {update}/{num_updates}] Avg Reward per Env: {ep_reward:.3f} | "
+              f"Collected steps this update: {batch.rewards.shape[0]}")
 
         if update % 5 == 0:
             agent.save_checkpoint()
+
 
 
 @torch.no_grad()
@@ -128,7 +126,8 @@ def inference_ppo(args):
         vis=args.vis,
         device=args.device,
         num_envs=args.num_envs,
-        noise_config={"audio_noise_level": args.audio_noise_level}
+        noise_config={"audio_noise_level": args.audio_noise_level},
+        inference_mode=True,
     )
 
     # Optional: unlock any curriculum limits
@@ -164,7 +163,7 @@ def inference_ppo(args):
 
         steps = 0
         ep_reward = torch.zeros(N, dtype=torch.float32)
-        reached = torch.zeros(N, dtype=torch.bool)       # whether each env reached 20cm
+        reached = torch.zeros(N, dtype=torch.bool)       # whether each env reached 30cm
         steps_to_success = torch.zeros(N, dtype=torch.long)
 
         while steps < MAX_STEPS:
@@ -178,7 +177,7 @@ def inference_ppo(args):
             ep_reward += reward.cpu()
             steps += 1
 
-            # Newly reached envs record their steps-to-20cm at the first time they reach it
+            # Newly reached envs record their steps-to-30cm at the first time they reach it
             newly = (~reached) & done.cpu()
             if newly.any():
                 steps_to_success[newly] = steps
@@ -186,7 +185,7 @@ def inference_ppo(args):
 
             state = next_state
 
-            # Stop early if all envs reached 20cm
+            # Stop early if all envs reached 30cm
             if reached.all():
                 break
 
@@ -207,14 +206,14 @@ def inference_ppo(args):
                 f"Steps executed: {steps}, "
                 f"Mean Reward: {mean_reward:.3f}, "
                 f"Success envs: {reached.sum().item()}/{N}, "
-                f"Avg steps-to-20cm (successful envs): {avg_steps_this_ep:.1f}"
+                f"Avg steps-to-30cm (successful envs): {avg_steps_this_ep:.1f}"
             )
         else:
             print(
                 f"[Inference {ep+1}/{args.num_episodes}] "
                 f"Steps executed: {steps}, "
                 f"Mean Reward: {mean_reward:.3f}, "
-                f"Success envs: 0/{N} (no reach within 20cm)"
+                f"Success envs: 0/{N} (no reach within 30cm)"
             )
 
     writer.close()
@@ -233,8 +232,8 @@ def inference_ppo(args):
 
     print("\n=== Inference Summary ===")
     print(f"Episodes: {args.num_episodes} | Envs: {N} | Attempts: {attempts_total}")
-    print(f"Reached 20cm: {successes_total}/{attempts_total} ({success_rate*100:.1f}%)")
-    print(f"Avg steps-to-20cm over all successes: {avg_steps_over_successes:.1f}")
+    print(f"Reached 30cm: {successes_total}/{attempts_total} ({success_rate*100:.1f}%)")
+    print(f"Avg steps-to-30cm over all successes: {avg_steps_over_successes:.1f}")
     print(f"Mean reward per env (averaged over episodes): {avg_reward_per_env:.3f}")
 
 
