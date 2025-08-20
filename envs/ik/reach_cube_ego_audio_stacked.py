@@ -44,7 +44,8 @@ class ReachCubeEgoAudioStackedEnv:
         self.listen_idx = listen_idx
         self.show_every = show_every
         # inside __init__
-        self.success_thresh = 0.001  # meters
+        self.success_thresh = 0.3001  # meters
+        self.success_bonus = 20.0  # default
 
         self.report_success_as_done = True
         self.inference_mode = inference_mode
@@ -155,30 +156,26 @@ class ReachCubeEgoAudioStackedEnv:
         self.scene.build(n_envs=self.num_envs, env_spacing=(5.0, 5.0))
         self.envs_idx = np.arange(self.num_envs)
 
-    def _anti_collapse_probs(self, per_pos_returns: np.ndarray) -> np.ndarray:
-        """
-        Reverse-rank mapping:
-          - Compute normalized returns p_i = R_i / sum(R)
-          - Sort positions by return (low -> high)
-          - Assign probabilities in reversed order (low gets highest, high gets lowest)
-          - Ties: stable mergesort ensures a deterministic order; reversing flips them.
-        """
+    def _anti_collapse_probs(self, per_pos_returns: np.ndarray, min_prob: float = 0.01) -> np.ndarray:
         R = np.maximum(per_pos_returns.astype(np.float64), 0.0)
         S = R.sum()
         if not np.isfinite(S) or S <= 0.0:
-            return np.ones(self.pos_count, dtype=np.float64) / self.pos_count
+            q = np.ones(self.pos_count, dtype=np.float64) / self.pos_count
+            return q.astype(np.float32)
 
         p = R / S
-        order_low_to_high = np.argsort(R, kind='mergesort')            # indices sorted by R ascending
-        p_sorted_high_to_low = np.sort(p)[::-1]                        # values (not indices) high -> low
+        order_low_to_high = np.argsort(R, kind='mergesort')
+        p_sorted_high_to_low = np.sort(p)[::-1]
 
         q = np.empty_like(p)
-        # positions with lowest R get the largest probability, etc.
         q[order_low_to_high] = p_sorted_high_to_low
-        q = q / q.sum()  # numerical hygiene
+        q = q / q.sum()
+
+        # floor + renormalize
+        if min_prob and min_prob > 0.0:
+            q = np.maximum(q, min_prob)
+            q = q / q.sum()
         return q.astype(np.float32)
-
-
 
     def _init_robot(self):
         """Reset the Franka robot to a neutral pose in all environments."""
@@ -445,8 +442,13 @@ class ReachCubeEgoAudioStackedEnv:
         report_success = self.report_success_as_done
 
         success_mask = (dist <= success_thresh)  # [num_envs] bool
-        bonus = success_mask.float() * 20.0  # +20 on success
-        rewards = (base_reward + bonus).to(self.device)  # [num_envs]
+
+        if self.success_bonus < 0:  # disable bonus if < 0
+            bonus = torch.zeros_like(success_mask, dtype=torch.float32, device=self.device)
+        else:
+            bonus = success_mask.float() * self.success_bonus
+
+        rewards = (base_reward + bonus).to(self.device)
 
         # Accumulate per-episode return *per env* until first success for that env
         # (include the success step; exclude any steps thereafter)
