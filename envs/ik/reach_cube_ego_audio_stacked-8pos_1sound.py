@@ -47,10 +47,6 @@ class ReachCubeEgoAudioStackedEnv:
         self.success_thresh = 0.3001  # meters
         self.success_bonus = 20.0  # default
 
-        # --- Sound selection (2 sounds, chosen per episode) ---
-        self.n_sounds = 2
-        self.current_sound_id = 0  # set on reset()
-
         self.report_success_as_done = True
         self.inference_mode = inference_mode
 
@@ -213,7 +209,6 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
 
-
     def _warn_once(self, msg: str):
         if not getattr(self, "_audio_warned", False):
             print(f"[Audio] {msg}")
@@ -241,19 +236,9 @@ class ReachCubeEgoAudioStackedEnv:
     def simulate_audio(self, dist: float) -> np.ndarray:
         sr, dur = 22050, 0.01
         t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+        tone = chirp(t, f0=1000, f1=1000, t1=dur) / (dist ** 2 + 1e-6)
 
-        # ----- Two alternative "source" sounds -----
-        if self.current_sound_id == 0:
-            # Sound A: steady 1 kHz tone
-            carrier = chirp(t, f0=1000, f1=1000, t1=dur, method="linear")
-        else:
-            # Sound B: sweeping chirp 600→2400 Hz (quadratic)
-            carrier = chirp(t, f0=600, f1=2400, t1=dur, method="quadratic")
-
-        # Distance attenuation
-        tone = carrier / (dist ** 2 + 1e-6)
-
-        # Base random background “scene” noise (unchanged)
+        # Base random noise
         noise = sum(
             np.random.rand() * chirp(
                 t,
@@ -264,7 +249,7 @@ class ReachCubeEgoAudioStackedEnv:
             for _ in range(5)
         ) * 0.1
 
-        # Additional configurable Gaussian noise
+        # Additional noise based on config
         audio_noise_level = self.noise_config.get("audio_noise_level", 0.0)
         additional_noise = np.random.normal(0, audio_noise_level, tone.shape)
 
@@ -320,6 +305,8 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
+
+
     def reset(self) -> torch.Tensor:
         """
         Reset environment and start a new episode.
@@ -345,16 +332,12 @@ class ReachCubeEgoAudioStackedEnv:
             one_pos = self.cube_positions[self.current_idx].reshape(1, -1)
             self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
 
-            # --- choose sound for this episode ---
-            self.current_sound_id = np.random.randint(0, self.n_sounds)
-
             # Reset robot & place cube
             self._init_robot()
             self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
             self.scene.step()
 
-            print(f"[Inference] Episode {self.episode_count}: pos idx={self.current_idx} "
-                  f"pos={self.current_cube_pos[0]} | sound_id={self.current_sound_id}")
+            print(f"[Inference] Episode {self.episode_count}: pos idx={self.current_idx} pos={self.current_cube_pos[0]}")
 
             # Reset histories + prime
             self.audio_history.clear()
@@ -407,16 +390,12 @@ class ReachCubeEgoAudioStackedEnv:
         self.env_pos_idx = np.random.choice(self.pos_count, size=self.num_envs, p=self.pos_probs)
         self.current_cube_pos = np.stack([self.cube_positions[i] for i in self.env_pos_idx], axis=0)
 
-        # --- choose sound for this episode ---
-        self.current_sound_id = np.random.randint(0, self.n_sounds)
-
         # Reset robot & place cube per env
         self._init_robot()
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        print(f"Episode {self.episode_count}: parallel sampling — "
-              f"pos_probs={np.round(self.pos_probs, 3).tolist()} | sound_id={self.current_sound_id}")
+        print(f"Episode {self.episode_count}: parallel sampling — pos_probs={np.round(self.pos_probs, 3).tolist()}")
 
         # Reset histories + prime
         self.audio_history.clear()
@@ -438,16 +417,17 @@ class ReachCubeEgoAudioStackedEnv:
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         return obs, done_array
 
-
     def step(self, actions: torch.Tensor):
         """
         Discrete Cartesian moves, audio/spectrogram update, reward, and done flags.
 
         Notes:
-          - success @ <= self.success_thresh meters -> +self.success_bonus and done=True (per-env)
+          - success @ <= self.success_thresh meters: +success_bonus and done=True (per-env)
           - base reward: exp(-4*dist), clamped to [0, 1]
           - per-env episode return is accumulated only until that env's first success
+            (so post-success steps don't bias the next-episode position probabilities)
           - plays back the *stacked* audio window every `show_every` steps for num_envs==1
+            (auto-disables playback after first failure; warns only once)
         """
         # Ensure actions are 1D int tensor on the right device
         actions = actions.long().to(self.device).view(-1)  # [num_envs]
@@ -475,9 +455,21 @@ class ReachCubeEgoAudioStackedEnv:
         new_slice = self._collect_spectrograms(play_audio=False)  # [num_envs, F, Tslice]
         self.audio_history.append(new_slice)
 
-        # Optional: play the full stacked buffer at intervals (listener env only)
+        # --- Optional playback of the full stacked window (listener env only) ---
+        # Play every `show_every` steps, only when running a single env.
         if self.num_envs == 1 and (self.step_count % self.show_every == 0):
-            self._play_stacked_buffer()
+            # Default-enable playback unless user turned it off; keep a single warning.
+            if getattr(self, "enable_playback", True):
+                try:
+                    snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
+                    full_buffer = np.concatenate(snippets, axis=0)
+                    sd.play(full_buffer, getattr(self, "_sd_rate", 22050))
+                    sd.wait()
+                except Exception as e:
+                    if not getattr(self, "_audio_warned", False):
+                        print(f"[Audio] Playback disabled ({type(e).__name__}: {e})")
+                        self._audio_warned = True
+                    self.enable_playback = False
 
         # Build stacked observation (num_envs, 1, F, Tstack)
         obs = self._build_observation()
@@ -492,8 +484,12 @@ class ReachCubeEgoAudioStackedEnv:
 
         base_reward = torch.clamp(torch.exp(-4 * dist), 0.0, 1.0)
 
-        success_mask = (dist <= self.success_thresh)  # [num_envs] bool
-        if self.success_bonus < 0:
+        success_thresh = self.success_thresh
+        report_success = self.report_success_as_done
+        success_mask = (dist <= success_thresh)  # [num_envs] bool
+
+        # Success bonus (set self.success_bonus < 0 to disable)
+        if getattr(self, "success_bonus", 20.0) < 0:
             bonus = torch.zeros_like(success_mask, dtype=torch.float32, device=self.device)
         else:
             bonus = success_mask.float() * self.success_bonus
@@ -501,21 +497,26 @@ class ReachCubeEgoAudioStackedEnv:
         rewards = (base_reward + bonus).to(self.device)
 
         # Accumulate per-episode return *per env* until first success for that env
+        # (include the success step; exclude any steps thereafter)
+        if not hasattr(self, "_done_mask_episode"):
+            # Fallback init if not present (keeps method robust)
+            self._done_mask_episode = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            self._episode_return_per_env = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+
         active_mask = (~self._done_mask_episode).float()  # [num_envs]
         self._episode_return_per_env += rewards * active_mask
-        self._done_mask_episode |= success_mask  # latch per-env done
+        self._done_mask_episode |= success_mask  # latch done per env for this episode
 
         # Keep existing mean bookkeeping if used elsewhere
         self._episode_return += rewards.mean().item()
 
         # Done flags (per env)
-        if self.report_success_as_done:
+        if report_success:
             dones = success_mask.to(self.device)
         else:
             dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, rewards, dones
-
 
     def _plot_stacked(self, data: torch.Tensor):
         """
