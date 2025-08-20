@@ -130,12 +130,11 @@ class ReachCubeEgoVisionStackedEnv:
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
 
-        # --- NEW: a sphere target (initially parked; we reposition on reset) ---
+        # --- NEW: a sphere target (primitive; no open3d dependency) ---
         self.sphere = self.scene.add_entity(
-            gs.morphs.Mesh(
-                file="meshes/sphere.obj",
-                scale=0.05,
-                pos=(0.0, 0.0, -1.0) , # initial placeholder
+            gs.morphs.Sphere(
+                radius=0.03,  # ~diameter 6 cm ~ your 0.06 cube
+                pos=(0.0, 0.0, -1.0),
                 collision=False
             ),
             surface=gs.surfaces.Rough(color=(0.0, 0.7, 0.0)),
