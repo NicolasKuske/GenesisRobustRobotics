@@ -45,7 +45,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.show_every = show_every
         # inside __init__
         self.success_thresh = 0.3001  # meters
-        self.success_bonus = 20.0  # default
+        self.success_bonus = -20.0  # default
 
         self.report_success_as_done = True
         self.inference_mode = inference_mode
@@ -156,7 +156,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.scene.build(n_envs=self.num_envs, env_spacing=(5.0, 5.0))
         self.envs_idx = np.arange(self.num_envs)
 
-    def _anti_collapse_probs(self, per_pos_returns: np.ndarray, min_prob: float = 0.01) -> np.ndarray:
+    def _anti_collapse_probs(self, per_pos_returns: np.ndarray, min_prob: float = 0.05) -> np.ndarray:
         R = np.maximum(per_pos_returns.astype(np.float64), 0.0)
         S = R.sum()
         if not np.isfinite(S) or S <= 0.0:
