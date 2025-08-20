@@ -141,10 +141,22 @@ class ReachCubeEgoVisionStackedEnv:
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
 
-        # --- NEW: per-episode random object selection (cube=0, sphere=1) ---
-        self.shape_probs = np.array([0.5, 0.5], dtype=np.float32)   # tweak to bias
-        self.use_sphere_mask = np.zeros(self.num_envs, dtype=bool)  # filled each reset()
+        # --- NEW: a bunny target (needs open3d for mesh decimation) ---
+        self.bunny = self.scene.add_entity(
+            gs.morphs.Mesh(
+                file="meshes/bunny.obj",  # adjust path if needed
+                scale=0.2,  # tweak until visually right
+                pos=(0.0, 0.0, -1.0),  # parked underground initially
+                collision=False
+            ),
+            surface=gs.surfaces.Rough(color=(0.9, 0.9, 0.9)),
+            material=gs.materials.Rigid(gravity_compensation=1.0)
+        )
 
+        # --- NEW: per-episode random object selection (cube=0, sphere=1, bunny=2) ---
+        self.shape_probs = np.array([0.33, 0.33, 0.34], dtype=np.float32)
+        self._current_object_kind = "cube"  # for logging
+        self._current_object_id = 0  # 0=cube, 1=sphere, 2=bunny
 
         # Camera setup
         self.cams = []
@@ -190,27 +202,28 @@ class ReachCubeEgoVisionStackedEnv:
         )
         self.franka.control_dofs_position(qpos[:,:-2], self.motors_dof, self.envs_idx)
 
-
     def _place_objects_for_current_episode(self):
-        """
-        Places the active object (cube or sphere) at self.current_cube_pos
-        on a per-env basis and 'parks' the inactive one far below the floor.
-        """
         far = np.array([0.0, 0.0, -100.0], dtype=float)
 
         cube_pos = self.current_cube_pos.copy()
         sphere_pos = self.current_cube_pos.copy()
+        bunny_pos = self.current_cube_pos.copy()
 
-        # Park whichever object is not selected in each env
-        cube_pos[self.use_sphere_mask] = far
-        sphere_pos[~self.use_sphere_mask] = far
+        if self._current_object_id == 0:  # cube active
+            sphere_pos[:] = far
+            bunny_pos[:] = far
+        elif self._current_object_id == 1:  # sphere active
+            cube_pos[:] = far
+            bunny_pos[:] = far
+        else:  # bunny active
+            cube_pos[:] = far
+            sphere_pos[:] = far
 
         self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
         self.sphere.set_pos(sphere_pos, envs_idx=self.envs_idx)
+        self.bunny.set_pos(bunny_pos, envs_idx=self.envs_idx)
 
-        # For logging/debug, keep human-readable labels
-        self._object_kinds = np.where(self.use_sphere_mask, "sphere", "cube")
-
+        self._object_kinds = ["cube", "sphere", "bunny"]
 
     def _render(self):
         imgs = []
@@ -297,13 +310,14 @@ class ReachCubeEgoVisionStackedEnv:
             # Reset robot
             self._init_robot()
 
-            # --- ONE SHAPE FOR ALL ENVS (random per episode) ---
-            use_sphere = (np.random.rand() < self.shape_probs[1])
-            self.use_sphere_mask = np.full(self.num_envs, use_sphere, dtype=bool)
-            self._current_object_kind = "sphere" if use_sphere else "cube"
+            # pick one object id for the whole episode
+            obj_id = np.random.choice([0, 1, 2], p=self.shape_probs)
+            self._current_object_id = obj_id
+            self._current_object_kind = ["cube", "sphere", "bunny"][obj_id]
 
-            # Place active object and park the other
+            # place objects: park the others underground
             self._place_objects_for_current_episode()
+
             self.scene.step()
 
             print(f"[Inference] Episode {self.episode_count}: pos idx={self._infer_cycle_idx} "
@@ -426,11 +440,17 @@ class ReachCubeEgoVisionStackedEnv:
             plt.pause(0.1)
             plt.show(block=False)
 
-        # --- Distance to the currently active object (cube or sphere) ---
-        cube_pos = self.cube.get_pos()       # [N, 3]
-        sphere_pos = self.sphere.get_pos()   # [N, 3]
-        mask = torch.as_tensor(self.use_sphere_mask, device=self.device, dtype=torch.bool)
-        obj_pos = torch.where(mask.unsqueeze(1), sphere_pos, cube_pos)
+        # --- Distance to the currently active object (cube / sphere / bunny) ---
+        cube_pos = self.cube.get_pos()  # [N, 3]
+        sphere_pos = self.sphere.get_pos()  # [N, 3]
+        bunny_pos = self.bunny.get_pos()  # [N, 3]
+
+        if self._current_object_id == 0:  # cube active
+            obj_pos = cube_pos
+        elif self._current_object_id == 1:  # sphere active
+            obj_pos = sphere_pos
+        else:  # bunny active
+            obj_pos = bunny_pos
 
         gp_l = self.franka.get_link("left_finger").get_pos()
         gp_r = self.franka.get_link("right_finger").get_pos()
