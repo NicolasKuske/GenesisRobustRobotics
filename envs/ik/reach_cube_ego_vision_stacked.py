@@ -93,7 +93,7 @@ class ReachCubeEgoVisionStackedEnv:
             sim_options=gs.options.SimOptions(dt=0.01),
             rigid_options=gs.options.RigidOptions(box_box_detection=True),
             show_viewer=vis,
-            vis_options=gs.options.VisOptions(plane_reflection=True),
+            vis_options=gs.options.VisOptions(show_world_frame = False,plane_reflection=True),
             renderer=gs.renderers.Rasterizer(),
         )
 
