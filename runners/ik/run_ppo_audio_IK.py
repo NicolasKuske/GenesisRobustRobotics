@@ -138,10 +138,17 @@ def inference_ppo(args):
         obs_shape=env.obs_shape,
         action_shape=env.action_space,
         device=args.device,
-        load=True,
+        load=False,  # force no checkpoint
         num_envs=args.num_envs,
         checkpoint_path=args.checkpoint_path
     )
+
+    # --- Force reset of all weights to random ---
+    #def reset_weights(m):
+    #    if hasattr(m, "reset_parameters"):
+    #        m.reset_parameters()
+    #agent.model.apply(reset_weights)
+
     agent.eval_mode(True)
 
     writer = SummaryWriter(log_dir=f"runs/{args.task}_inference")
