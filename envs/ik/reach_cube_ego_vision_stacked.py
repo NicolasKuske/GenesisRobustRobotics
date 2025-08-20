@@ -286,10 +286,12 @@ class ReachCubeEgoVisionStackedEnv:
     def reset(self):
         """
         Curriculum-aware reset:
-          - INFERENCE: cycle deterministically through positions.
-          - TRAINING: update position probabilities from last episode's returns
-                      (reverse-rank anti-collapse), then sample positions per env.
-        In both modes, pick ONE shape (cube/sphere) for ALL envs this episode.
+          - INFERENCE: cycle deterministically through positions (all envs share the same pos).
+          - TRAINING: update next-episode position distribution (reverse-rank anti-collapse),
+                      then sample positions (per-env) from that distribution.
+
+        In both modes, pick ONE object type (cube/sphere/bunny) for ALL envs this episode
+        using self.shape_probs.
         Returns: stacked observation tensor [N, C, H, W].
         """
         # =========================
@@ -300,33 +302,33 @@ class ReachCubeEgoVisionStackedEnv:
             self._episode_active = True
             self._episode_return = 0.0
 
-            # deterministic cycle over positions
-            self._infer_cycle_idx = (getattr(self, "_infer_cycle_idx", 0) + 1) % self.pos_count
-            self.env_pos_idx = np.full(self.num_envs, self._infer_cycle_idx, dtype=np.int64)
+            # Use current index, then advance (round-robin through positions)
+            idx = getattr(self, "_infer_cycle_idx", 0) % self.pos_count
+            self._infer_cycle_idx = (idx + 1) % self.pos_count
 
-            one_pos = self.cube_positions[self._infer_cycle_idx].reshape(1, -1)
-            self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
+            # All envs share the same position this episode
+            self.env_pos_idx = np.full(self.num_envs, idx, dtype=np.int64)
+            pos1 = self.cube_positions[idx].reshape(1, 3)
+            self.current_cube_pos = np.repeat(pos1, self.num_envs, axis=0)
 
-            # Reset robot
+            # Reset robot kinematics
             self._init_robot()
 
-            # pick one object id for the whole episode
+            # --- ONE SHAPE FOR ALL ENVS (cube/sphere/bunny) ---
             obj_id = np.random.choice([0, 1, 2], p=self.shape_probs)
             self._current_object_id = obj_id
             self._current_object_kind = ["cube", "sphere", "bunny"][obj_id]
 
-            # place objects: park the others underground
+            # Place active object and park the others
             self._place_objects_for_current_episode()
-
             self.scene.step()
 
-            print(f"[Inference] Episode {self.episode_count}: pos idx={self._infer_cycle_idx} "
+            print(f"[Inference] Episode {self.episode_count}: pos idx={idx} "
                   f"pos={self.current_cube_pos[0].tolist()} | object={self._current_object_kind}")
 
-            # Histories
+            # Prime stacked history
             self.image_history.clear()
             first = self._render()
-            self.image_history.clear()
             for _ in range(self.history_length):
                 self.image_history.append(first.clone())
 
@@ -343,16 +345,14 @@ class ReachCubeEgoVisionStackedEnv:
 
         # If we just finished an episode, update next-episode position distribution
         if getattr(self, "_episode_active", False):
-            # Aggregate returns per position from the last episode
             per_env = self._episode_return_per_env.detach().cpu().numpy()
             per_pos_returns = np.zeros(self.pos_count, dtype=np.float64)
             for i in range(self.pos_count):
                 per_pos_returns[i] = per_env[self.env_pos_idx == i].sum()
 
-            # Compute next distribution (reverse-rank) with floor
+            # Compute next distribution (reverse-rank) with floor at 0.05
             self.pos_probs = self._anti_collapse_probs(per_pos_returns, min_prob=0.05)
 
-            # Debug info
             counts = np.bincount(self.env_pos_idx, minlength=self.pos_count)
             pr = np.round(per_pos_returns, 3).tolist()
             pp = np.round(self.pos_probs, 3).tolist()
@@ -365,26 +365,26 @@ class ReachCubeEgoVisionStackedEnv:
         self._episode_return_per_env.zero_()
         self._done_mask_episode.zero_()
 
-        # Sample a position for each env from the learned distribution
+        # Sample a position for each env from learned distribution
         self.env_pos_idx = np.random.choice(self.pos_count, size=self.num_envs, p=self.pos_probs)
         self.current_cube_pos = np.stack([self.cube_positions[i] for i in self.env_pos_idx], axis=0)
 
         # Reset robot
         self._init_robot()
 
-        # --- ONE SHAPE FOR ALL ENVS (random per episode) ---
-        use_sphere = (np.random.rand() < self.shape_probs[1])
-        self.use_sphere_mask = np.full(self.num_envs, use_sphere, dtype=bool)
-        self._current_object_kind = "sphere" if use_sphere else "cube"
+        # --- ONE SHAPE FOR ALL ENVS (cube/sphere/bunny) ---
+        obj_id = np.random.choice([0, 1, 2], p=self.shape_probs)
+        self._current_object_id = obj_id
+        self._current_object_kind = ["cube", "sphere", "bunny"][obj_id]
 
-        # Place active object and park the other
+        # Place active object and park the others
         self._place_objects_for_current_episode()
         self.scene.step()
 
         print(f"Episode {self.episode_count}: pos_probs={np.round(self.pos_probs, 3).tolist()} "
               f"| assigned idx={self.env_pos_idx.tolist()} | object={self._current_object_kind}")
 
-        # --- PRIME STACKED HISTORY ---
+        # Prime stacked history
         self.image_history.clear()
         first = self._render()
         for _ in range(self.history_length):
