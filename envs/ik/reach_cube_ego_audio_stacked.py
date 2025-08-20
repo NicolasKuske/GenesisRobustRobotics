@@ -48,7 +48,7 @@ class ReachCubeEgoAudioStackedEnv:
         self.success_bonus = 20.0  # default
 
         # --- Sound selection (2 sounds, chosen per episode) ---
-        self.n_sounds = 2
+        self.n_sounds = 3
         self.current_sound_id = 0  # set on reset()
 
         self.report_success_as_done = True
@@ -237,20 +237,26 @@ class ReachCubeEgoAudioStackedEnv:
             self._warn_once(f"Playback disabled ({type(e).__name__}: {e})")
             self.enable_playback = False
 
-
     def simulate_audio(self, dist: float) -> np.ndarray:
         sr, dur = 22050, 0.01
         t = np.linspace(0, dur, int(sr * dur), endpoint=False)
 
-        # ----- Two alternative "source" sounds -----
+        # ----- Three alternative "source" sounds -----
         if self.current_sound_id == 0:
             # Sound A: steady 1 kHz tone
             carrier = chirp(t, f0=1000, f1=1000, t1=dur, method="linear")
-        else:
+
+        elif self.current_sound_id == 1:
             # Sound B: sweeping chirp 600→2400 Hz (quadratic)
             carrier = chirp(t, f0=600, f1=2400, t1=dur, method="quadratic")
 
-        # Distance attenuation
+        else:
+            # Sound C: 1.5 kHz tone with slow amplitude modulation (tremolo @ 8 Hz)
+            base = chirp(t, f0=1500, f1=1500, t1=dur, method="linear")
+            mod = 0.5 * (1.0 + np.sin(2 * np.pi * 8 * t))  # in [0,1]
+            carrier = base * mod
+
+        # Distance attenuation (inverse-square)
         tone = carrier / (dist ** 2 + 1e-6)
 
         # Base random background “scene” noise (unchanged)
