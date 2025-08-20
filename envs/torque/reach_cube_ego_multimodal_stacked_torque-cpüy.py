@@ -11,7 +11,7 @@ import sounddevice as sd
 
 class ReachCubeEgoMultimodalStackedTorqueEnv:
     """
-    Multimodal environment with stacked vision and audio inputs.
+    Multimodal environment with not_stacked vision and audio inputs.
     Uses direct torque control (continuous actions).
     """
     def __init__(

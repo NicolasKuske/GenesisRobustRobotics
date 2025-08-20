@@ -12,9 +12,9 @@ import sounddevice as sd
 
 class ReachCubeEgoAudioStackedTorqueEnv:
     """
-    Audio-only, stacked-frame, continuous-torque environment with curriculum on cube X-axis sampling.
+    Audio-only, not_stacked-frame, continuous-torque environment with curriculum on cube X-axis sampling.
     Agent outputs a 7-dim torque vector, scaled by ±1.
-    For single-envs mode, displays the stacked spectrogram and plays audio.
+    For single-envs mode, displays the not_stacked spectrogram and plays audio.
     """
 
     def __init__(
@@ -248,7 +248,7 @@ class ReachCubeEgoAudioStackedTorqueEnv:
 
     def step(self, actions: torch.Tensor):
         """
-        Apply torques, collect audio, update history, plot stacked spectrogram,
+        Apply torques, collect audio, update history, plot not_stacked spectrogram,
         and compute reward/done flags.
         """
         # 1) Apply torques
@@ -272,7 +272,7 @@ class ReachCubeEgoAudioStackedTorqueEnv:
         new_slice = self._collect_spectrograms()
         self.audio_history.append(new_slice)
 
-        # 3) Build the full stacked observation (5 frames × 10 ms each)
+        # 3) Build the full not_stacked observation (5 frames × 10 ms each)
         obs = self._build_observation()
 
         # 4) For single-envs, every `show_every` steps: play & plot the FULL stack

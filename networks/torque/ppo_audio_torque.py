@@ -5,12 +5,12 @@ import torch.nn as nn
 class PPOAudioTorque(nn.Module):
     """
     Convolutional Actor-Critic networks for PPO with continuous torque outputs.
-    Processes stacked spectrogram inputs and produces a Gaussian policy (mean and std) over joint torques,
+    Processes not_stacked spectrogram inputs and produces a Gaussian policy (mean and std) over joint torques,
     along with a state-value estimate.
     """
     def __init__(self, obs_shape, action_dim, hidden_dim=256):
         super(PPOAudioTorque, self).__init__()
-        # obs_shape: (C, F, T) where C=1, F=257, T=6 (stacked frames)
+        # obs_shape: (C, F, T) where C=1, F=257, T=6 (not_stacked frames)
         C, F, T = obs_shape
         # 1) Convolutional trunk (adapted from simple audio networks)
         self.conv = nn.Sequential(

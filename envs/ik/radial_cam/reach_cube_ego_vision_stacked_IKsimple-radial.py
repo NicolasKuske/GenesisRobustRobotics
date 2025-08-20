@@ -281,7 +281,7 @@ class ReachCubeEgoVisionStackedEnv:
 
         obs = self._build_observation()
 
-        # plot the stacked frames
+        # plot the not_stacked frames
         if self.num_envs == 1 and self.step_count % 100 == 0:
             frames = obs[0].cpu().numpy().reshape(len(self.sample_offsets), 3, 120, 120)
 

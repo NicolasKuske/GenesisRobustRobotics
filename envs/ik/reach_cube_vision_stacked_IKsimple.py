@@ -26,7 +26,7 @@ class ReachCubeVisionStackedEnv:
         self.initial_pos = np.array([0.65, 0.0, 0.1])[None, :]
         self.current_cube_pos = None
 
-        # stacked‐vision obs: 5 frames × 3 channels
+        # not_stacked‐vision obs: 5 frames × 3 channels
         self.obs_shape = (3 * len(self.sample_offsets), 120, 120)
         self.action_space = 6
 
@@ -171,7 +171,7 @@ class ReachCubeVisionStackedEnv:
         new_frame = self._render()
         self.image_history.append(new_frame)
 
-        # build stacked observation
+        # build not_stacked observation
         obs = self._build_observation()
 
         # compute reward + done as before

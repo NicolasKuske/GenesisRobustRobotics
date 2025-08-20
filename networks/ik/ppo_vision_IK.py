@@ -25,9 +25,10 @@ class PPOvision(nn.Module):
             nn.Conv2d(64, 64, kernel_size=3, stride=1), nn.ReLU(),
         )
 
-        # figure out the size of the conv output so we can build the heads
         with torch.no_grad():
-            dummy = torch.zeros(1, C, H, W)
+            dev = next(self.parameters()).device if any(p.requires_grad for p in self.parameters()) else torch.device(
+                'cpu')
+            dummy = torch.zeros(1, C, H, W, device=dev)
             conv_out_size = self.conv(dummy).view(1, -1).shape[1]
 
         # policy head: produces action logits

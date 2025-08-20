@@ -14,11 +14,11 @@ import sounddevice as sd
 class ReachCubeEgoAudioStackedEnv:
     """
     Genesis environment with audio-only observations and random cube repositioning.
-    Observations are stacked spectrogram frames over a short history.
+    Observations are not_stacked spectrogram frames over a short history.
 
     Each step returns an observation tensor of shape (num_envs, 1, F, T),
-    where F is the number of frequency bins and T is the number of stacked time frames.
-    Optionally plays back the full stacked audio window for the designated listener index.
+    where F is the number of frequency bins and T is the number of not_stacked time frames.
+    Optionally plays back the full not_stacked audio window for the designated listener index.
     """
 
     def __init__(
@@ -49,7 +49,7 @@ class ReachCubeEgoAudioStackedEnv:
         # Store noise config
         self.noise_config = noise_config if noise_config else {"audio_noise_level": 0.0}
 
-        # Spectrogram dimensions: freq bins and stacked time frames
+        # Spectrogram dimensions: freq bins and not_stacked time frames
         self.freq_bins = 257
         self.time_bins = len(self.sample_offsets)
         self.obs_shape = (1, self.freq_bins, self.time_bins) #(1,257,5)
@@ -201,7 +201,7 @@ class ReachCubeEgoAudioStackedEnv:
     def reset(self) -> torch.Tensor:
         """
         Reset the envs: randomize the cube, re-init the robot, clear history,
-        populate with the first slice, and return the initial stacked obs.
+        populate with the first slice, and return the initial not_stacked obs.
         """
         self.episode_count += 1
         # Decide new cube position
@@ -247,7 +247,7 @@ class ReachCubeEgoAudioStackedEnv:
     def step(self, actions: torch.Tensor):
         """
         Apply the discrete action, step the sim, update histories,
-        optionally play the full stacked audio window, and compute rewards.
+        optionally play the full not_stacked audio window, and compute rewards.
         """
         # Move end-effector by fixed deltas
         deltas = torch.tensor([
@@ -269,7 +269,7 @@ class ReachCubeEgoAudioStackedEnv:
         new_slice = self._collect_spectrograms(play_audio=False)
         self.audio_history.append(new_slice)
 
-        # Play the full stacked audio window at intervals
+        # Play the full not_stacked audio window at intervals
         if self.listen_idx is not None and (self.step_count % self.show_every == 0):
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
@@ -293,7 +293,7 @@ class ReachCubeEgoAudioStackedEnv:
 
     def _plot_stacked(self, data: torch.Tensor):
         """
-        Render the stacked spectrogram in the live preview figure.
+        Render the not_stacked spectrogram in the live preview figure.
         """
         plt.clf()
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]

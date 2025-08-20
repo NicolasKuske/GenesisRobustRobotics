@@ -14,11 +14,11 @@ import sounddevice as sd
 class ReachCubeEgoAudioStackedEnv:
     """
     Genesis environment with audio-only observations and configurable cube repositioning schedule.
-    Observations are stacked spectrogram frames over a short history.
+    Observations are not_stacked spectrogram frames over a short history.
 
     Each step returns an observation tensor of shape (num_envs, 1, F, T),
-    where F is the number of frequency bins and T is the number of stacked time frames.
-    Optionally plays back the full stacked audio window for the designated listener index.
+    where F is the number of frequency bins and T is the number of not_stacked time frames.
+    Optionally plays back the full not_stacked audio window for the designated listener index.
 
     The cube alternates between two fixed positions: [0.2, -0.8, 0.2] (easy) and [0.2, 0.8, 0.2] (hard).
     It stays at the hard position for `hard_episodes` episodes, then at the easy position for
@@ -105,7 +105,7 @@ class ReachCubeEgoAudioStackedEnv:
         # Store noise config
         self.noise_config = noise_config if noise_config else {"audio_noise_level": 0.0}
 
-        # Spectrogram dimensions: freq bins and stacked time frames
+        # Spectrogram dimensions: freq bins and not_stacked time frames
         self.freq_bins = 257
         self.time_bins = len(self.sample_offsets)
         self.obs_shape = (1, self.freq_bins, self.time_bins)
@@ -227,7 +227,7 @@ class ReachCubeEgoAudioStackedEnv:
         if not self.enable_playback or self.num_envs != 1:
             return
         try:
-            # Build stacked window from history (listener env only)
+            # Build not_stacked window from history (listener env only)
             snippets = [self.raw_audio_history[offset] for offset in self.sample_offsets]
             full_buffer = np.concatenate(snippets, axis=0)
             sd.play(full_buffer, self._sd_rate)
@@ -457,7 +457,7 @@ class ReachCubeEgoAudioStackedEnv:
           - success @ <= self.success_thresh meters -> +self.success_bonus and done=True (per-env)
           - base reward: exp(-4*dist), clamped to [0, 1]
           - per-env episode return is accumulated only until that env's first success
-          - plays back the *stacked* audio window every `show_every` steps for num_envs==1
+          - plays back the *not_stacked* audio window every `show_every` steps for num_envs==1
         """
         # Ensure actions are 1D int tensor on the right device
         actions = actions.long().to(self.device).view(-1)  # [num_envs]
@@ -485,11 +485,11 @@ class ReachCubeEgoAudioStackedEnv:
         new_slice = self._collect_spectrograms(play_audio=False)  # [num_envs, F, Tslice]
         self.audio_history.append(new_slice)
 
-        # Optional: play the full stacked buffer at intervals (listener env only)
+        # Optional: play the full not_stacked buffer at intervals (listener env only)
         if self.num_envs == 1 and (self.step_count % self.show_every == 0):
             self._play_stacked_buffer()
 
-        # Build stacked observation (num_envs, 1, F, Tstack)
+        # Build not_stacked observation (num_envs, 1, F, Tstack)
         obs = self._build_observation()
         if self.num_envs == 1 and self.step_count % self.show_every == 0:
             self._plot_stacked(obs[0, 0])
@@ -529,7 +529,7 @@ class ReachCubeEgoAudioStackedEnv:
 
     def _plot_stacked(self, data: torch.Tensor):
         """
-        Render the stacked spectrogram in the live preview figure.
+        Render the not_stacked spectrogram in the live preview figure.
         """
         plt.clf()
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]

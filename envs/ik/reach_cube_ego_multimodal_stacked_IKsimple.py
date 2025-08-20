@@ -14,7 +14,7 @@ import sounddevice as sd
 
 class ReachCubeEgoMultimodalStackedEnv:
     """
-    Multimodal environment with stacked vision and audio inputs.
+    Multimodal environment with not_stacked vision and audio inputs.
     Uses frame-skipping for efficiency and aligned history of length 25.
     """
     def __init__(

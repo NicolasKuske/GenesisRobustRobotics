@@ -14,11 +14,11 @@ import sounddevice as sd
 class ReachCubeEgoAudioStackedEnv:
     """
     Genesis environment with audio-only observations and random cube repositioning.
-    Observations are stacked spectrogram frames over a short history.
+    Observations are not_stacked spectrogram frames over a short history.
 
     Each step returns an observation tensor of shape (num_envs, 1, F, T),
-    where F is the number of frequency bins and T is the number of stacked time frames.
-    Optionally plays back the full stacked audio window for the designated listener index.
+    where F is the number of frequency bins and T is the number of not_stacked time frames.
+    Optionally plays back the full not_stacked audio window for the designated listener index.
     """
 
     def __init__(
@@ -315,7 +315,7 @@ class ReachCubeEgoAudioStackedEnv:
 
     def _plot_stacked(self, data: torch.Tensor):
         """
-        Render the stacked spectrogram in the live preview figure.
+        Render the not_stacked spectrogram in the live preview figure.
         """
         plt.clf()
         extent = [0, 10 * len(self.sample_offsets), 0, (22050 / 2) / 1000]

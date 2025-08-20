@@ -11,7 +11,7 @@ import sounddevice as sd
 
 class ReachCubeEgoMultimodalStackedTorqueEnv:
     """
-    Multimodal stacked vision/audio environment with torque control,
+    Multimodal not_stacked vision/audio environment with torque control,
     reward shaping, and curriculum learning on cube X-axis placement.
     """
 

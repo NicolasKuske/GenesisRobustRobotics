@@ -2,21 +2,21 @@
 
 
 #xzy position only
-from envs.ik.reach_cube_position_IK import ReachCubePositionCurrEnv
-from envs.ik.reach_cube_position_IKsimple import ReachCubePositionEnv
+from envs.ik.not_stacked.reach_cube_position_IK import ReachCubePositionCurrEnv
+from envs.ik.not_stacked.reach_cube_position_IKsimple import ReachCubePositionEnv
 
 #third person vision only
 from envs.torque.reach_cube_vision_torque import ReachCubeVisionTorqueEnv
-from envs.ik.reach_cube_vision_IK import ReachCubeVisionCurrEnv
-from envs.ik.reach_cube_vision_IKsimple import ReachCubeVisionEnv
+from envs.ik.not_stacked.reach_cube_vision_IK import ReachCubeVisionCurrEnv
+from envs.ik.not_stacked.reach_cube_vision_IKsimple import ReachCubeVisionEnv
 from envs.ik.reach_cube_vision_stacked_IKsimple import ReachCubeVisionStackedEnv
 
 #end effector ego perspective vision only
-from envs.ik.reach_cube_ego_vision_IKsimple import ReachCubeEgoVisionEnv
-from envs.ik.reach_cube_ego_vision_stacked_IKsimple import ReachCubeEgoVisionStackedEnv
+from envs.ik.not_stacked.reach_cube_ego_vision_IKsimple import ReachCubeEgoVisionEnv
+from envs.ik.reach_cube_ego_vision_stacked import ReachCubeEgoVisionStackedEnv
 
 #end effector microphone only
-from envs.ik.reach_cube_ego_audio import ReachCubeEgoAudioEnv
+from envs.ik.not_stacked.reach_cube_ego_audio import ReachCubeEgoAudioEnv
 from envs.ik.reach_cube_ego_audio_stacked import ReachCubeEgoAudioStackedEnv
 
 #both end effector vision and microphone

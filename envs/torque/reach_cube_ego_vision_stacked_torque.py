@@ -10,7 +10,7 @@ from genesis.utils.geom import trans_quat_to_T, xyz_to_quat
 
 class ReachCubeEgoVisionStackedTorqueEnv:
     """
-    Ego-centric, stacked-frame, continuous-torque environment with curriculum on cube X-axis sampling.
+    Ego-centric, not_stacked-frame, continuous-torque environment with curriculum on cube X-axis sampling.
     Agent outputs a 7-dim torque vector, scaled by ±1.
     """
 

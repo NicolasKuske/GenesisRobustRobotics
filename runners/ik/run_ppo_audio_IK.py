@@ -138,7 +138,7 @@ def inference_ppo(args):
         obs_shape=env.obs_shape,
         action_shape=env.action_space,
         device=args.device,
-        load=False,  # force no checkpoint
+        load=True,  # force no checkpoint
         num_envs=args.num_envs,
         checkpoint_path=args.checkpoint_path
     )
