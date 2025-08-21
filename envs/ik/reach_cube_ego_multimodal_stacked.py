@@ -1,5 +1,3 @@
-#envs/ik/reach_cube_ego_multimodal_stacked.py
-
 
 import math
 from collections import deque
@@ -35,23 +33,22 @@ class ReachCubeEgoMultimodalStackedEnv:
     # Construction
     # -------------------------
     def __init__(
-            self,
-            vis: bool,
-            device: torch.device,
-            num_envs: int = 1,
-            listen_idx: int = 0,
-            show_every: int = 10,
-            render_every: int = 5,
-            noise_config: dict | None = None,
-            success_thresh: float = 0.3001,
-            success_bonus: float = 20.0,
-            report_success_as_done: bool = True,
-            cube_positions=None,
-            inference_mode: bool = False,
-            # --- ADD THIS ---
-            objects_per_episode: int = 1,
+        self,
+        vis: bool,
+        device: torch.device,
+        num_envs: int = 1,
+        listen_idx: int = 0,
+        show_every: int = 10,          # audio playback / plotting cadence (steps)
+        render_every: int = 5,         # frame skip for vision/audio generation
+        noise_config: dict | None = None,
+        # reward/done parity
+        success_thresh: float = 0.3001,
+        success_bonus: float = 20.0,
+        report_success_as_done: bool = True,
+        # curriculum controls
+        cube_positions=None,           # list of (x, y, z); if None, use 3×3 grid
+        inference_mode: bool = False,  # when True, cycle positions deterministically
     ):
-
         # --- core params ---
         self.device = device
         self.num_envs = num_envs
@@ -100,7 +97,6 @@ class ReachCubeEgoMultimodalStackedEnv:
         # --- objects & shape↔sound pairing ---
         self._object_kinds = ["cube", "sphere", "bunny", "dragon"]
         self._shape_to_sound = {0: 0, 1: 1, 2: 2, 3: 3}  # index-aligned
-        self.objects_per_episode = max(1, min(int(objects_per_episode), len(self._object_entities)))
 
         self.shape_probs = np.ones(len(self._object_kinds), dtype=np.float32)
         self.shape_probs /= self.shape_probs.sum()
@@ -493,11 +489,8 @@ class ReachCubeEgoMultimodalStackedEnv:
 
             self._init_robot()
 
-            # choose one object kind for the episode from the first K in fixed order
-            K = self.objects_per_episode
-            probs_k = self.shape_probs[:K]
-            probs_k = probs_k / probs_k.sum()
-            obj_id = int(np.random.choice(K, p=probs_k))
+            # choose one object kind for the episode (uniform)
+            obj_id = int(np.random.choice(len(self._object_entities), p=self.shape_probs))
             self._current_object_id = obj_id
             self._current_object_kind = self._object_kinds[self._current_object_id]
             self.current_sound_id = self._shape_to_sound[self._current_object_id]
@@ -556,11 +549,8 @@ class ReachCubeEgoMultimodalStackedEnv:
         # reset robot
         self._init_robot()
 
-        # sample one object kind for all envs from the first K
-        K = self.objects_per_episode
-        probs_k = self.shape_probs[:K]
-        probs_k = probs_k / probs_k.sum()
-        obj_id = int(np.random.choice(K, p=probs_k))
+        # sample one object kind for all envs
+        obj_id = int(np.random.choice(len(self._object_entities), p=self.shape_probs))
         self._current_object_id = obj_id
         self._current_object_kind = self._object_kinds[self._current_object_id]
         self.current_sound_id = self._shape_to_sound[self._current_object_id]
@@ -653,7 +643,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         dist = torch.norm(obj_pos - (gp_l + gp_r) / 2, dim=1)  # [N]
 
         # reward parity
-        base_reward = torch.clamp(torch.exp(-4 * dist), 0.0, 1.0)
+        base_reward = torch.clamp(torch.exp(-2 * dist), 0.0, 1.0)
         success_mask = (dist <= self.success_thresh)
         if self.success_bonus < 0:
             bonus = torch.zeros_like(dist, dtype=torch.float32, device=self.device)
