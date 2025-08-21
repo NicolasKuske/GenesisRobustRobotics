@@ -32,7 +32,7 @@ pip install genesis-world==0.2.1
 
 Additional dependencies:
 ```
-pip install tensorboard librosa sounddevice
+pip install tensorboard librosa sounddevice open3d
 ```
 ```
 apt-get update && apt-get install -y libegl1-mesa libegl1-mesa-dev libgles2-mesa libgles2-mesa-dev libgl1-mesa-dev libglvnd-dev libxrender1 libxext6 libsm6 libgl1-mesa-glx libportaudio2 libasound-dev
