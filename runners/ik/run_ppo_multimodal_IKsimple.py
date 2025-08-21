@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from agents.ik.ppo_agent_multimodal_IKsimple import PPOAgentMultimodal
 from envs.ik.reach_cube_ego_multimodal_stacked_IKsimple import ReachCubeEgoMultimodalStackedEnv
+from envs.ik.reach_cube_ego_multimodal_stacked_IKsimple import ReachCubeEgoMultimodalStackedEnv
 
 
 def train_ppo(args):

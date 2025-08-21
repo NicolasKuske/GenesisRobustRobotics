@@ -103,6 +103,9 @@ class ReachCubeEgoMultimodalStackedEnv:
         self._current_object_kind = self._object_kinds[self._current_object_id]
         self.current_sound_id = self._shape_to_sound[self._current_object_id]
 
+        # Discrete action count (±x, ±y, ±z)
+        self.action_space = 6
+
         # --- positions / curriculum ---
         if cube_positions is None:
             self.cube_positions = [
