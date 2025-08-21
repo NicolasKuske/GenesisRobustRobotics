@@ -1,93 +1,68 @@
 # File: networks/ik/ppo_multimodal_IK.py
-
 import torch
 import torch.nn as nn
-
-
-class _VisionStem(nn.Module):
-    """
-    Vision conv trunk (same spirit as PPOvision) for inputs (B, C_v, H, W).
-    """
-    def __init__(self, obs_shape_v):
-        super().__init__()
-        C, H, W = obs_shape_v
-        self.conv = nn.Sequential(
-            nn.Conv2d(C, 32, kernel_size=8, stride=4), nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2), nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1), nn.ReLU(),
-        )
-        # probe output size
-        with torch.no_grad():
-            dev = torch.device('cpu')
-            dummy = torch.zeros(1, C, H, W, device=dev)
-            flat_dim = self.conv(dummy).view(1, -1).size(1)
-        self.head = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(flat_dim, 256),
-            nn.ReLU(),
-        )
-
-    def forward(self, x):
-        return self.head(self.conv(x))  # (B, 256)
-
-
-class _AudioStem(nn.Module):
-    """
-    Audio conv trunk (same spirit as PPOaudio) for inputs (B, C_a, F, T).
-    Default C_a=1, F=257, T=5 (stacked 10ms slices at 5 offsets).
-    """
-    def __init__(self, obs_shape_a):
-        super().__init__()
-        C, F, T = obs_shape_a
-        self.conv = nn.Sequential(
-            nn.Conv2d(C, 32, kernel_size=(8, 3), stride=(2, 1), padding=(2, 1)), nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=(5, 3), stride=(2, 1), padding=(1, 1)), nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)), nn.ReLU(),
-        )
-        # probe output size
-        with torch.no_grad():
-            dev = torch.device('cpu')
-            dummy = torch.zeros(1, C, F, T, device=dev)
-            flat_dim = self.conv(dummy).view(1, -1).size(1)
-        self.head = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(flat_dim, 256),
-            nn.ReLU(),
-        )
-
-    def forward(self, x):
-        return self.head(self.conv(x))  # (B, 256)
-
+from networks.ik.ppo_vision_IK import PPOvision
+from networks.ik.ppo_audio_IK  import PPOaudio
 
 class PPOmultimodal(nn.Module):
     """
-    Vision + Audio → fused features → policy logits + value.
-    Mirrors your unimodal actor-critic heads.
-
-    Inputs:
-      vision: (B, C_v, H, W)
-      audio:  (B, C_a, F, T)
-    Outputs:
-      logits: (B, action_dim), value: (B,)
+    Vision + Audio -> fused embedding -> policy logits + value.
+    Uses unimodal backbones as feature extractors (encode()).
     """
-    def __init__(self, obs_shape_v, obs_shape_a, action_dim):
+    def __init__(
+        self,
+        obs_shape_v,
+        obs_shape_a,
+        action_dim,
+        freeze_unimodal: bool = False,
+        use_attention: bool = False,
+        use_layernorm: bool = True
+    ):
         super().__init__()
-        self.vis = _VisionStem(obs_shape_v)
-        self.aud = _AudioStem(obs_shape_a)
+        self.vision = PPOvision(obs_shape_v, output_dim=action_dim)
+        self.audio  = PPOaudio(obs_shape_a, action_dim)
 
-        # fuse (256 + 256) → 256
+        # Optionally freeze only the conv (and shared) parts
+        if freeze_unimodal:
+            for p in self.vision.conv.parameters():  p.requires_grad = False
+            for p in self.vision.embed.parameters(): p.requires_grad = False
+            for p in self.audio.conv.parameters():   p.requires_grad = False
+            for p in self.audio.shared.parameters(): p.requires_grad = False
+
+        self.use_attention = use_attention
+        self.norm_v = nn.LayerNorm(256) if use_layernorm else nn.Identity()
+        self.norm_a = nn.LayerNorm(256) if use_layernorm else nn.Identity()
+
+        # Optional 2-way attention gate over {vision, audio}
+        if use_attention:
+            self.attn = nn.Sequential(
+                nn.Linear(512, 128), nn.Tanh(),
+                nn.Linear(128, 2), nn.Softmax(dim=-1)
+            )
+        else:
+            self.attn = None
+
+        # Fusion + heads
         self.fusion = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.ReLU(),
+            nn.Linear(512, 256), nn.ReLU(),
         )
-
         self.pi = nn.Linear(256, action_dim)
         self.v  = nn.Linear(256, 1)
 
     def forward(self, x_v, x_a):
-        hv = self.vis(x_v)   # (B, 256)
-        ha = self.aud(x_a)   # (B, 256)
-        h  = self.fusion(torch.cat([hv, ha], dim=1))  # (B, 256)
+        hv = self.vision.encode(x_v)  # (B, 256)
+        ha = self.audio.encode(x_a)   # (B, 256)
+
+        hv = self.norm_v(hv)
+        ha = self.norm_a(ha)
+
+        if self.attn is not None:
+            comb = torch.cat([hv, ha], dim=1)        # (B, 512)
+            w = self.attn(comb)                      # (B, 2)
+            hv = hv * w[:, 0:1]
+            ha = ha * w[:, 1:1+1]
+
+        h  = self.fusion(torch.cat([hv, ha], dim=1)) # (B, 256)
         logits = self.pi(h)
         value  = self.v(h).squeeze(-1)
         return logits, value

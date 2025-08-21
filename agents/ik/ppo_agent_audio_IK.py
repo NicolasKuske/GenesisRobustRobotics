@@ -1,4 +1,4 @@
-# agents/ppo_agent_audio_IK.py
+# agents/ik/ppo_agent_audio_IK.py
 
 
 import torch

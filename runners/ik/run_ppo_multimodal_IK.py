@@ -16,6 +16,12 @@ from envs import *  # ensure ReachCubeEgoMultimodalStackedEnv is exported in env
 from agents.ik.ppo_agent_multimodal_IK import PPOAgentMultimodal, RolloutBatchMM
 
 
+
+import warnings
+warnings.filterwarnings("ignore", message="n_fft=512 is too large")
+
+
+
 # -------------------------
 # Task registry (mirror audio/vision)
 # -------------------------

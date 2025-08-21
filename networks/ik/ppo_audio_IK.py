@@ -4,10 +4,6 @@ import torch
 import torch.nn as nn
 
 class PPOaudio(nn.Module):
-    """
-    Conv backbone -> shared features -> policy logits + state value.
-    Input x: (B, C, F, T)
-    """
     def __init__(self, obs_shape, action_dim):
         super().__init__()
         C, F, T = obs_shape
@@ -19,8 +15,7 @@ class PPOaudio(nn.Module):
         )
 
         with torch.no_grad():
-            # ensure shape-probing runs on the same device as the module
-            dev = next(self.parameters()).device if len(list(self.parameters())) else torch.device('cpu')
+            dev = torch.device('cpu')
             dummy = torch.zeros(1, C, F, T, device=dev)
             flat_dim = self.conv(dummy).view(1, -1).size(1)
 
@@ -29,11 +24,15 @@ class PPOaudio(nn.Module):
             nn.Linear(flat_dim, 256),
             nn.ReLU(),
         )
-        self.pi = nn.Linear(256, action_dim)  # policy logits
-        self.v  = nn.Linear(256, 1)           # state value
+        self.pi = nn.Linear(256, action_dim)
+        self.v  = nn.Linear(256, 1)
+
+    def encode(self, x):
+        return self.shared(self.conv(x))  # (B, 256)
 
     def forward(self, x):
-        h = self.shared(self.conv(x))
+        h = self.encode(x)
         logits = self.pi(h)
         value  = self.v(h).squeeze(-1)
         return logits, value
+
