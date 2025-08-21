@@ -1,3 +1,5 @@
+# runners/ik/run_ppo_vision_IK.py
+
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 

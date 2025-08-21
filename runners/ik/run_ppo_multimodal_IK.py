@@ -1,3 +1,5 @@
+# runners/ik/run_ppo_multimodal_IK.py
+
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'  # comment out for Windows or MacOS
 
@@ -10,70 +12,39 @@ import genesis as gs
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from agents.ik.ppo_agent_multimodal_IKsimple import PPOAgentMultimodal
-from envs.ik.reach_cube_ego_multimodal_stacked import ReachCubeEgoMultimodalStackedEnv
+from envs import *  # ensure ReachCubeEgoMultimodalStackedEnv is exported in envs/__init__.py
+from agents.ik.ppo_agent_multimodal_IK import PPOAgentMultimodal, RolloutBatchMM
 
 
 # -------------------------
-# Helpers
+# Task registry (mirror audio/vision)
 # -------------------------
-def build_noise_config(args):
-    """
-    Merge new-style split flags and old-style '--noise visual 3 audio 5' list.
-    New flags win if both are provided.
-    """
-    cfg = {}
+task_to_class = {
+    'ReachCubeEgoMultimodalStacked': ReachCubeEgoMultimodalStackedEnv,
+    # add more variants here if you expose them via envs/__init__.py
+}
 
-    # Old style: --noise visual 3 audio 5
-    if args.noise:
-        try:
-            tmp = {args.noise[i]: float(args.noise[i + 1]) for i in range(0, len(args.noise), 2)}
-            # env supports both legacy keys and *_noise_level keys
-            if "visual" in tmp:
-                cfg["visual"] = tmp["visual"]
-            if "audio" in tmp:
-                cfg["audio"] = tmp["audio"]
-        except Exception as e:
-            print(f"[WARN] Could not parse --noise list: {e}. Ignoring.")
-
-    # New style (preferred)
-    if args.visual_noise_level is not None:
-        cfg["visual_noise_level"] = float(args.visual_noise_level)
-    if args.audio_noise_level is not None:
-        cfg["audio_noise_level"] = float(args.audio_noise_level)
-
-    return cfg
+def create_environment(task_name):
+    if task_name in task_to_class:
+        return task_to_class[task_name]
+    raise ValueError(f"\n Task '{task_name}' is not recognized.\n")
 
 
-def make_env(args):
-    noise_config = build_noise_config(args)
-    env = ReachCubeEgoMultimodalStackedEnv(
+# -------------------------
+# Train
+# -------------------------
+def train_ppo(args):
+    env_cls = create_environment(args.task)
+    env = env_cls(
         vis=args.vis,
         device=args.device,
         num_envs=args.num_envs,
-        # success/done parity
-        success_thresh=args.success_thresh,
-        success_bonus=args.success_bonus,
-        report_success_as_done=not args.no_done_on_success,
-        # curriculum
-        inference_mode=(args.mode == "inference"),
-        # debugging: force object rotation each episode if desired
-        #deterministic_object_cycle=args.deterministic_object_cycle,
-        # adjustable cadence
-        render_every=args.render_every,
-        show_every=args.show_every,
-        # noise
-        noise_config=noise_config,
+        noise_config={
+            "visual_noise_level": args.visual_noise_level,
+            "audio_noise_level": args.audio_noise_level
+        },
+        inference_mode=False,
     )
-    print("Created multimodal environment:", env)
-    return env
-
-
-# -------------------------
-# TRAIN
-# -------------------------
-def train_ppo(args):
-    env = make_env(args)
 
     agent = PPOAgentMultimodal(
         obs_shape_vision=env.obs_shape_vision,
@@ -81,99 +52,136 @@ def train_ppo(args):
         action_shape=env.action_space,
         lr=1e-4,
         gamma=0.99,
+        lam=0.95,
         clip_epsilon=0.2,
+        epochs=10,
+        batch_size=64,
+        value_coef=0.5,
+        entropy_coef=0.01,
         device=args.device,
         load=args.load,
         num_envs=args.num_envs,
-        checkpoint_path=args.checkpoint
+        checkpoint_path=args.checkpoint_path
     )
 
     writer = SummaryWriter(log_dir=f"runs/{args.task}")
-
-    # You were using an episode-style loop; we’ll keep that (your agent.train expects lists).
-    for episode in range(args.max_episodes):
-        state_v, state_a = env.reset()
-        total_reward = torch.zeros(env.num_envs, device=args.device)
-        done_array = torch.zeros(env.num_envs, dtype=torch.bool, device=args.device)
-
-        states_v, states_a, actions, rewards, dones = [], [], [], [], []
-
-        for _ in range(args.max_steps):
-            action, _ = agent.select_action(state_v, state_a)
-            (next_v, next_a), reward, done = env.step(action)
-
-            states_v.append(state_v)
-            states_a.append(state_a)
-            actions.append(action)
-            rewards.append(reward)
-            dones.append(done)
-
-            state_v, state_a = next_v, next_a
-            total_reward += reward
-            done_array |= done
-            if done_array.all():
-                break
-
-        agent.train(states_v, states_a, actions, rewards, dones)
-
-        if episode % args.save_every == 0:
-            agent.save_checkpoint()
-            print(f"[Episode {episode}] Checkpoint saved to {args.checkpoint}")
-
-        mean_reward = total_reward.mean().item()
-        writer.add_scalar('Reward/Mean', mean_reward, episode)
-        print(f"[Episode {episode}] Mean Reward: {mean_reward:.4f}")
-
+    run(env, agent, args, writer)
     writer.close()
 
 
+def run(env, agent, args, writer):
+    T = 100
+    N = args.num_envs
+    total_steps = 1_000_000
+    num_updates = total_steps // (T * N)
+
+    for update in range(1, num_updates + 1):
+        sv, sa = env.reset()
+
+        states_v, states_a, actions, log_probs, values, rewards, dones = [], [], [], [], [], [], []
+
+        for t in range(T):
+            states_v.append(sv)
+            states_a.append(sa)
+
+            # STRICT actor–critic API (no shim)
+            a, logp, ent, val = agent.select_action(sv, sa)
+
+            actions.append(a)
+            log_probs.append(logp.detach())
+            values.append(val.detach())
+
+            (sv_next, sa_next), reward, done = env.step(a)
+
+            rewards.append(reward.to(agent.device))
+            dones.append(done.to(agent.device).float())
+
+            sv, sa = sv_next, sa_next
+            if done.all():
+                break
+
+        # Bootstrap with trailing value
+        states_v.append(sv)
+        states_a.append(sa)
+        with torch.no_grad():
+            _, last_value = agent.model(sv.to(agent.device), sa.to(agent.device))
+        values.append(last_value.detach())
+
+        batch = RolloutBatchMM(
+            states_v=torch.stack(states_v),     # [t_len+1, N, C_v, H, W]
+            states_a=torch.stack(states_a),     # [t_len+1, N, C_a, F, T]
+            actions=torch.stack(actions),       # [t_len,   N]
+            log_probs=torch.stack(log_probs),   # [t_len,   N]
+            values=torch.stack(values),         # [t_len+1, N]
+            rewards=torch.stack(rewards),       # [t_len,   N]
+            dones=torch.stack(dones),           # [t_len,   N]
+        )
+
+        agent.train(batch)
+
+        ep_reward = batch.rewards.sum(dim=0).mean().item()
+        writer.add_scalar('Reward/Mean', ep_reward, update)
+        print(f"[Update {update}/{num_updates}] Avg Reward per Env: {ep_reward:.3f} | "
+              f"Collected steps this update: {batch.rewards.shape[0]}")
+
+        if update % 3 == 0:
+            agent.save_checkpoint()
+
 # -------------------------
-# INFERENCE
+# Inference (parity with audio/vision)
 # -------------------------
 @torch.no_grad()
 def inference_ppo(args):
-    # Inference env cycles positions deterministically when inference_mode=True.
-    env = make_env(args)
+    env_cls = create_environment(args.task)
+    env = env_cls(
+        vis=args.vis,
+        device=args.device,
+        num_envs=args.num_envs,
+        noise_config={
+            "visual_noise_level": args.visual_noise_level,
+            "audio_noise_level": args.audio_noise_level
+        },
+        inference_mode=True,
+    )
 
     agent = PPOAgentMultimodal(
         obs_shape_vision=env.obs_shape_vision,
         obs_shape_audio=env.obs_shape_audio,
         action_shape=env.action_space,
         device=args.device,
-        load=True,  # force load (no training)
+        load=True,
         num_envs=args.num_envs,
-        checkpoint_path=args.checkpoint
+        checkpoint_path=args.checkpoint_path
     )
-    if hasattr(agent, "eval_mode"):
-        agent.eval_mode(True)
+    agent.eval_mode(True)
 
     writer = SummaryWriter(log_dir=f"runs/{args.task}_inference")
 
     deterministic = True
     N = args.num_envs
-    MAX_STEPS = args.max_steps
+    MAX_STEPS = 100
 
     total_successes = torch.zeros(N, dtype=torch.long)
     total_steps_to_success = torch.zeros(N, dtype=torch.long)
     total_rewards = torch.zeros(N, dtype=torch.float32)
 
-    def act(agent, sv, sa, deterministic=True):
-        # Prefer agent.act if available; otherwise fall back to select_action
-        if hasattr(agent, "act"):
-            return agent.act(sv, sa, deterministic=deterministic)
-        a, _ = agent.select_action(sv, sa)
-        return a
-
     for ep in range(args.num_episodes):
         sv, sa = env.reset()
+        if sv is None:
+            print("[INFO] Environment returned None on reset, ending inference.")
+            break
+
         steps = 0
         ep_reward = torch.zeros(N, dtype=torch.float32)
         reached = torch.zeros(N, dtype=torch.bool)
         steps_to_success = torch.zeros(N, dtype=torch.long)
 
         while steps < MAX_STEPS:
-            a = act(agent, sv, sa, deterministic=deterministic)
+            a = agent.act(sv, sa, deterministic=deterministic)
             (sv_next, sa_next), reward, done = env.step(a)
+            if sv_next is None:
+                print("[INFO] Environment returned None during step, stopping current episode.")
+                break
 
             ep_reward += reward.cpu()
             steps += 1
@@ -184,11 +192,9 @@ def inference_ppo(args):
             reached |= done.cpu()
 
             sv, sa = sv_next, sa_next
-
             if reached.all():
                 break
 
-        # episode accounting
         total_rewards += ep_reward
         total_successes += reached.long()
         total_steps_to_success += steps_to_success * reached.long()
@@ -201,105 +207,66 @@ def inference_ppo(args):
             avg_steps_this_ep = steps_to_success[reached].float().mean().item()
             print(
                 f"[Inference {ep+1}/{args.num_episodes}] "
-                f"Steps: {steps}, Mean Reward: {mean_reward:.3f}, "
+                f"Steps executed: {steps}, "
+                f"Mean Reward: {mean_reward:.3f}, "
                 f"Success envs: {reached.sum().item()}/{N}, "
-                f"Avg steps-to-30cm: {avg_steps_this_ep:.1f}"
+                f"Avg steps-to-30cm (successful envs): {avg_steps_this_ep:.1f}"
             )
         else:
             print(
                 f"[Inference {ep+1}/{args.num_episodes}] "
-                f"Steps: {steps}, Mean Reward: {mean_reward:.3f}, "
+                f"Steps executed: {steps}, "
+                f"Mean Reward: {mean_reward:.3f}, "
                 f"Success envs: 0/{N} (no reach within 30cm)"
             )
 
     writer.close()
 
-    # Final summary
-    successes_total = int(total_successes.sum().item())
-    attempts_total = N * args.num_episodes
-    success_rate = successes_total / attempts_total if attempts_total > 0 else 0.0
-
-    if successes_total > 0:
-        avg_steps_over_successes = (total_steps_to_success.sum().item() / successes_total)
-    else:
-        avg_steps_over_successes = float('nan')
-
-    avg_reward_per_env = (total_rewards / max(args.num_episodes, 1)).mean().item()
-
-    print("\n=== Inference Summary ===")
-    print(f"Episodes: {args.num_episodes} | Envs: {N} | Attempts: {attempts_total}")
-    print(f"Reached 30cm: {successes_total}/{attempts_total} ({success_rate*100:.1f}%)")
-    print(f"Avg steps-to-30cm over successes: {avg_steps_over_successes:.1f}")
-    print(f"Mean reward per env (avg over episodes): {avg_reward_per_env:.3f}")
-
 
 # -------------------------
-# CLI
+# CLI (mirror audio/vision)
 # -------------------------
-def parse_args():
+def arg_parser():
     p = argparse.ArgumentParser()
-    p.add_argument('-v', '--vis', action='store_true', help='Enable visualization')
-    p.add_argument('-l', '--load', nargs='?', const='default',
-                   help='Load checkpoint: -l for default, -l PATH for custom')
-    p.add_argument('-n', '--num_envs', type=int, default=1, help='Number of envs')
-    p.add_argument('-t', '--task', type=str,
-                   default='ReachCubeEgoMultimodalStacked', help='Task name (for logs/checkpoint naming)')
-    p.add_argument('-d', '--device', type=str, default='cuda', help='cpu or cuda')
- 
-    # Training loop
-    p.add_argument('--max_episodes', type=int, default=1_000_000, help='Max episodes (train)')
-    p.add_argument('--max_steps', type=int, default=100, help='Max steps per episode')
-    p.add_argument('--save_every', type=int, default=5, help='Episodes between saves')
+    p.add_argument("-v",  "--vis", action="store_true", help="Enable visualization")
+    p.add_argument("-l",  "--load_path", nargs="?", const="default", default=None,
+                   help="`-l` alone loads default checkpoint; `-l path.pth` loads that file")
+    p.add_argument("-n",  "--num_envs", type=int, default=1, help="Number of envs")
+    p.add_argument("-t",  "--task", type=str, default="ReachCubeEgoMultimodalStacked", help="Task")
+    p.add_argument("-d",  "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
 
-    # Noise (new flags; old --noise list also supported)
-    p.add_argument('--visual_noise_level', type=float, default=0.0, help='RGB noise std-dev')
-    p.add_argument('--audio_noise_level', type=float, default=0.0, help='Audio Gaussian noise std-dev')
-    p.add_argument('--noise', nargs='+', default=[],
-                   help="Legacy: --noise visual 3 audio 5 (new flags override these)")
+    # noise flags (passed as noise_config to env)
+    p.add_argument("--visual_noise_level", type=float, default=0.0, help="Gaussian noise std-dev added to RGB")
+    p.add_argument("--audio_noise_level",  type=float, default=0.0, help="Audio Gaussian noise std-dev")
 
-    # Success / reward parity
-    p.add_argument('--success_thresh', type=float, default=0.3001, help='Success distance [m]')
-    p.add_argument('--success_bonus', type=float, default=20.0, help='Bonus on success')
-    p.add_argument('--no_done_on_success', action='store_true',
-                   help="If set, env won't terminate on success (report_success_as_done=False)")
-
-    # Env cadence
-    p.add_argument('--render_every', type=int, default=5, help='Frame skip for rendering/audio')
-    p.add_argument('--show_every', type=int, default=10, help='Plot/playback cadence (steps)')
-
-    # Debug: prove shapes change episode-by-episode
-    p.add_argument('--deterministic_object_cycle', action='store_true',
-                   help='Cycle cube→sphere→bunny→dragon deterministically each episode')
-
-    # Mode
-    p.add_argument('-m', '--mode', choices=['train', 'inference'], default='train', help='Run mode')
-    p.add_argument('--num_episodes', type=int, default=100,
-                   help='Episodes for inference mode')
-
+    p.add_argument("-m",  "--mode", choices=['train', 'inference'], default='train', help="Run mode")
+    p.add_argument("--num_episodes", type=int, default=100, help="Episodes for inference mode")
     return p.parse_args()
 
 
 def main():
-    args = parse_args()
+    args = arg_parser()
+
+    # checkpoint path (same pattern as audio/vision)
+    default_ckpt = f"logs/{args.task}_ppo_checkpoint.pth"
+    if args.load_path:
+        args.load = True
+        args.checkpoint_path = default_ckpt if args.load_path == "default" else args.load_path
+    else:
+        args.load = False
+        args.checkpoint_path = default_ckpt
+
+    os.makedirs(os.path.dirname(args.checkpoint_path), exist_ok=True)
+
+    if args.mode == 'inference' and not os.path.isfile(args.checkpoint_path):
+        print(f"[ERROR] Checkpoint not found for inference: {args.checkpoint_path}")
+        sys.exit(1)
+
+    backend = gs.cpu if args.device.lower().startswith("cpu") else gs.gpu
+    gs.init(backend=backend)
 
     # unify device
     args.device = torch.device(args.device)
-
-    # checkpoint path
-    default = Path('logs') / f"{args.task}_ppo_checkpoint.pth"
-    if args.load:
-        args.checkpoint = default if args.load == 'default' else Path(args.load)
-        if not args.checkpoint.is_file():
-            print(f"[ERROR] Checkpoint not found: {args.checkpoint}", file=sys.stderr)
-            sys.exit(1)
-        print("Loading checkpoint from:", args.checkpoint)
-    else:
-        args.checkpoint = default
-        print("No checkpoint provided; starting from scratch.")
-    args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
-
-    backend = gs.cpu if args.device.type == 'cpu' else gs.gpu
-    gs.init(backend=backend)
 
     if args.mode == 'train':
         train_ppo(args)
@@ -307,5 +274,5 @@ def main():
         inference_ppo(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

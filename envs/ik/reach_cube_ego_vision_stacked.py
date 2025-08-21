@@ -1,4 +1,4 @@
-# envs/ik/reach_cube_ego_video_stacked.py
+# envs/ik/reach_cube_ego_vision_stacked.py
 
 import math
 from collections import deque

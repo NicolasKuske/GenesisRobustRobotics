@@ -20,7 +20,7 @@ from envs.ik.not_stacked.reach_cube_ego_audio import ReachCubeEgoAudioEnv
 from envs.ik.reach_cube_ego_audio_stacked import ReachCubeEgoAudioStackedEnv
 
 #both end effector vision and microphone
-from envs.ik.reach_cube_ego_multimodal_stacked_IKsimple import ReachCubeEgoMultimodalStackedEnv
+from envs.ik.reach_cube_ego_multimodal_stacked import ReachCubeEgoMultimodalStackedEnv
 
 
 #directJointcontrol

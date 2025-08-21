@@ -1,4 +1,4 @@
-# networks/ppo_vision_IK.py
+# networks/ik/ppo_vision_IK.py
 
 
 import torch
