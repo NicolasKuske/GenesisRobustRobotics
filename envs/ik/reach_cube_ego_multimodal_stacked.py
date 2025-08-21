@@ -1,4 +1,3 @@
-
 import math
 from collections import deque
 
@@ -18,7 +17,7 @@ class ReachCubeEgoMultimodalStackedEnv:
 
     Key features:
       - Reward parity with audio/vision envs:
-          base_reward = clamp(exp(-4 * dist), 0, 1)
+          base_reward = clamp(exp(-2 * dist), 0, 1)   # (doc updated to match code)
           success @ dist <= success_thresh -> +success_bonus and (optionally) done=True
           per-env episode return is accumulated only until first success
       - Parallel position curriculum with anti-collapse probability updates (training)
@@ -27,6 +26,8 @@ class ReachCubeEgoMultimodalStackedEnv:
           cube↔0, sphere↔1, bunny↔2, dragon↔3 (one object kind per episode, shared across envs).
       - Vision: stacked RGB with frame skipping.
       - Audio: stacked spectrogram slices; optional playback of the stacked raw buffer.
+      - NEW: `train_object_count` (1..4) restricts which object kinds can be sampled per episode:
+          1=cube; 2=cube+sphere; 3=cube+sphere+bunny; 4=all.
     """
 
     # -------------------------
@@ -48,6 +49,8 @@ class ReachCubeEgoMultimodalStackedEnv:
         # curriculum controls
         cube_positions=None,           # list of (x, y, z); if None, use 3×3 grid
         inference_mode: bool = False,  # when True, cycle positions deterministically
+        ### NEW
+        train_object_count: int = 4,   # 1..4: restrict eligible object kinds for sampling
     ):
         # --- core params ---
         self.device = device
@@ -98,8 +101,13 @@ class ReachCubeEgoMultimodalStackedEnv:
         self._object_kinds = ["cube", "sphere", "bunny", "dragon"]
         self._shape_to_sound = {0: 0, 1: 1, 2: 2, 3: 3}  # index-aligned
 
-        self.shape_probs = np.ones(len(self._object_kinds), dtype=np.float32)
-        self.shape_probs /= self.shape_probs.sum()
+        ### NEW — restrict eligible objects to the first K (1..4)
+        self.train_object_count = int(max(1, min(int(train_object_count), len(self._object_kinds))))
+        self.allowed_object_ids = list(range(self.train_object_count))
+        # Build probs: allowed get 1/K, others 0
+        self.shape_probs = np.zeros(len(self._object_kinds), dtype=np.float32)
+        self.shape_probs[self.allowed_object_ids] = 1.0 / self.train_object_count
+
         self._current_object_id = 0
         self._current_object_kind = self._object_kinds[self._current_object_id]
         self.current_sound_id = self._shape_to_sound[self._current_object_id]
@@ -240,6 +248,18 @@ class ReachCubeEgoMultimodalStackedEnv:
         qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=self.pos, quat=self.quat)
         self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
+
+    ### NEW
+    def set_train_object_count(self, count: int):
+        """
+        Change the number of eligible object kinds during runtime (1..4).
+        Rebuilds shape_probs accordingly for future episodes.
+        """
+        k = int(max(1, min(int(count), len(self._object_kinds))))
+        self.train_object_count = k
+        self.allowed_object_ids = list(range(k))
+        self.shape_probs = np.zeros(len(self._object_kinds), dtype=np.float32)
+        self.shape_probs[self.allowed_object_ids] = 1.0 / k
 
     # -------------------------
     # Curriculum utils
@@ -465,10 +485,10 @@ class ReachCubeEgoMultimodalStackedEnv:
         """
         Inference:
           - cycle positions deterministically (shared across envs).
-          - sample exactly ONE object kind for the whole episode.
+          - sample exactly ONE object kind for the whole episode (restricted by train_object_count).
         Training:
           - update anti-collapse position probs from last episode; sample per-env positions.
-          - sample exactly ONE object kind for the whole episode.
+          - sample exactly ONE object kind for the whole episode (restricted by train_object_count).
         Always:
           - place only the active object at current positions; others parked far away;
           - prime stacked histories with the first frame/spec repeated.
@@ -489,7 +509,7 @@ class ReachCubeEgoMultimodalStackedEnv:
 
             self._init_robot()
 
-            # choose one object kind for the episode (uniform)
+            # choose one object kind for the episode (restricted by shape_probs)
             obj_id = int(np.random.choice(len(self._object_entities), p=self.shape_probs))
             self._current_object_id = obj_id
             self._current_object_kind = self._object_kinds[self._current_object_id]
@@ -549,7 +569,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         # reset robot
         self._init_robot()
 
-        # sample one object kind for all envs
+        # sample one object kind for all envs (restricted by shape_probs)
         obj_id = int(np.random.choice(len(self._object_entities), p=self.shape_probs))
         self._current_object_id = obj_id
         self._current_object_kind = self._object_kinds[self._current_object_id]
@@ -665,23 +685,3 @@ class ReachCubeEgoMultimodalStackedEnv:
         # keep pos for next step
         self.pos = pos
         return (vis_obs, aud_obs), rewards, dones
-
-
-if __name__ == "__main__":
-    gs.init(backend=gs.gpu)
-    env = ReachCubeEgoMultimodalStackedEnv(
-        vis=True,
-        device=torch.device("cuda"),
-        num_envs=2,
-        inference_mode=False,
-        success_thresh=0.3001,
-        success_bonus=20.0,
-        report_success_as_done=True,
-    )
-    obs = env.reset()
-    for _ in range(200):
-        actions = torch.randint(0, 6, (env.num_envs,), device=env.device)
-        obs, rewards, dones = env.step(actions)
-        if dones.any():
-            print("Done!", dones)
-            break
