@@ -663,7 +663,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         dist = torch.norm(obj_pos - (gp_l + gp_r) / 2, dim=1)  # [N]
 
         # reward parity
-        base_reward = torch.clamp(torch.exp(-2 * dist), 0.0, 1.0)
+        base_reward = torch.clamp(torch.exp(-4 * dist), 0.0, 1.0)
         success_mask = (dist <= self.success_thresh)
         if self.success_bonus < 0:
             bonus = torch.zeros_like(dist, dtype=torch.float32, device=self.device)
