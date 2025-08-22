@@ -288,7 +288,7 @@ class ReachCubeEgoAudioStackedEnv:
         S_db_normalized = (S_db + 20) / 140
         S_db_normalized = np.clip(S_db_normalized, 0.0, 1.0)
 
-        return torch.from_numpy(S_db_normalized).float()
+        return torch.from_numpy(S_db).float()
 
     def _collect_spectrograms(self, play_audio: bool = False) -> torch.Tensor:
         """
