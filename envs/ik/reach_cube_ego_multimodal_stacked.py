@@ -15,16 +15,13 @@ class ReachCubeEgoMultimodalStackedEnv:
     """
     Multimodal (vision + audio) IK reaching environment with stacked RGB frames and stacked spectrogram slices.
 
-    Cube-only + audio-style schedule:
-      - The cube alternates between two fixed positions:
-          * HARD for `hard_episodes` episodes in a row (episode 1 starts hard),
-          * then EASY for `easy_episodes` episodes in a row,
-        repeating indefinitely.
+    Curriculum (two positions: hard/easy):
+      - Training: anti-collapse per-episode update over per-position returns; sample positions per-env.
+      - Inference: deterministic alternating hard/easy shared across envs.
 
     Observations
       - Vision: stacked RGB frames at indices `sample_offsets`, shape N×(3k)×H×W
-      - Audio: stacked spectrogram slices at the same offsets, shape N×1×F×T
-        (F=257; each slice is a single STFT time step; T=k)
+      - Audio: stacked spectrogram slices at the same offsets, shape N×1×F×k  (F=257; one STFT time slice per offset)
 
     Reward / done
       - base = clamp(exp(-4 * dist), 0, 1)
@@ -43,26 +40,39 @@ class ReachCubeEgoMultimodalStackedEnv:
         listen_idx: int = 0,
         show_every: int = 10,          # audio playback / plotting cadence (steps)
         render_every: int = 5,         # frame skip for vision/audio generation
+        randomize_every: int = 100,    # kept for compatibility; not used
         noise_config: dict | None = None,
+
         # reward/done parity
         success_thresh: float = 0.3001,
         success_bonus: float = 20.0,
         report_success_as_done: bool = True,
-        # --- NEW: audio-style cube schedule ---
+
+        # positions (two-point curriculum)
+        hard_pos=None,                 # defaults to [0.2,  0.8, 0.2] if None
+        easy_pos=None,                 # defaults to [0.2, -0.8, 0.2] if None
+
+        # curriculum controls
+        inference_mode: bool = False,  # deterministic alternating eval
+        min_prob: float = 0.05,        # probability floor in anti-collapse
+        ensure_each_position: bool = True,  # try to include both positions when num_envs >= 2
+
+        # history / stacking
+        history_length: int = 25,
+        sample_offsets=None,           # e.g. [-21, -16, -11, -6, -1]
+
+        # --- legacy schedule params (ignored, kept for compatibility) ---
         easy_episodes: int = 1,
         hard_episodes: int = 1,
-        hard_pos=None,                 # defaults to [0.5, -0.3, 0.2] if None
-        easy_pos=None,                 # defaults to [0.2, -0.8, 0.2] if None
-        # kept only for compatibility with old callers (ignored)
         cube_positions=None,
-        inference_mode: bool = False,
     ):
         # --- core params ---
         self.device = device
         self.num_envs = num_envs
-        self.listen_idx = listen_idx
-        self.show_every = show_every
-        self.render_every = render_every
+        self.listen_idx = int(listen_idx)
+        self.show_every = int(show_every)
+        self.render_every = int(render_every)
+        self.randomize_every = int(randomize_every)  # not used
 
         # reward / done config
         self.success_thresh = float(success_thresh)
@@ -76,13 +86,18 @@ class ReachCubeEgoMultimodalStackedEnv:
         self._audio_noise_level = float(self.noise_config.get("audio_noise_level",
                                         self.noise_config.get("audio", 0.0)))
 
-        # schedule configuration
-        self.easy_episodes = int(easy_episodes)
-        self.hard_episodes = int(hard_episodes)
-        assert self.easy_episodes > 0 and self.hard_episodes > 0, "easy_episodes and hard_episodes must be > 0"
-        self.cycle_length = self.easy_episodes + self.hard_episodes
-        self.hard_pos = np.array(hard_pos if hard_pos is not None else [0.2, 0.8, 0.2], dtype=float).reshape(1, 3)
-        self.easy_pos = np.array(easy_pos if easy_pos is not None else [0.2, -0.8, 0.2], dtype=float).reshape(1, 3)
+        # positions / curriculum setup
+        hp = np.array(hard_pos if hard_pos is not None else [0.2,  0.8, 0.2], dtype=float).reshape(3,)
+        ep = np.array(easy_pos if easy_pos is not None else [0.2, -0.8, 0.2], dtype=float).reshape(3,)
+        self.cube_positions = [hp, ep]
+        self.pos_names = ["hard", "easy"]
+        self.pos_count = 2
+
+        self.pos_probs = np.ones(self.pos_count, dtype=np.float32) / self.pos_count
+        self.env_pos_idx = np.zeros(self.num_envs, dtype=np.int64)
+        self.current_cube_pos = None  # (N, 3)
+        self.min_prob = float(min_prob)
+        self.ensure_each_position = bool(ensure_each_position)
 
         # accounting
         self.episode_count = 0
@@ -95,10 +110,10 @@ class ReachCubeEgoMultimodalStackedEnv:
         self._sd_rate = 22050
 
         # --- history config ---
-        self.history_length = 25
-        self.sample_offsets = [-21, -16, -11, -6, -1]  # time indices into deques
+        self.history_length = int(history_length)
+        self.sample_offsets = sample_offsets or [-21, -16, -11, -6, -1]  # time indices into deques
 
-        # actiion shape!!
+        # action shape
         self.action_space = 6
 
         # Vision history/shape
@@ -109,22 +124,24 @@ class ReachCubeEgoMultimodalStackedEnv:
         self.audio_history = deque(maxlen=self.history_length)       # each: [N, F, 1]
         self.raw_audio_history = deque(maxlen=self.history_length)   # each: 1D np array (10 ms)
         self.freq_bins = 257
-        self.time_bins_per_slice = 1  # 10 ms -> single STFT time step with n_fft=512, hop=256
-        self.obs_shape_audio = (1, self.freq_bins, self.time_bins_per_slice * len(self.sample_offsets))
+        self.obs_shape_audio = (1, self.freq_bins, len(self.sample_offsets))  # one time slice per offset
 
-        # --- plotting ---
+        # plotting
         self.enable_plotting = (num_envs == 1)
         try:
             self.fig_multimodal = plt.figure("Multimodal Observation", figsize=(14, 6))
         except Exception:
-            # If no display / backend issues, just disable plotting
             self.enable_plotting = False
 
-        # per-episode accounting
+        # per-episode accounting (success bookkeeping)
         self._episode_active = False
         self._episode_return = 0.0
         self._episode_return_per_env = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self._done_mask_episode = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+        # curriculum mode
+        self.inference_mode = bool(inference_mode)
+        self._infer_cycle_idx = 0  # 0 -> hard, 1 -> easy
 
         # --- build scene ---
         self.scene = gs.Scene(
@@ -165,7 +182,6 @@ class ReachCubeEgoMultimodalStackedEnv:
             surface=gs.surfaces.Rough(color=(0.99, 0.82, 0.09)),
             material=gs.materials.Rigid(gravity_compensation=1.0),
         )
-        # ---------------------
 
         # cameras mounted to EE
         self.cams = []
@@ -208,7 +224,6 @@ class ReachCubeEgoMultimodalStackedEnv:
 
         qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=self.pos, quat=self.quat)
         self.franka.control_dofs_position(qpos[:, :-2], self.motors_dof, self.envs_idx)
-        self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
 
     # -------------------------
     # Rendering / observation (vision)
@@ -252,7 +267,7 @@ class ReachCubeEgoMultimodalStackedEnv:
     def simulate_audio(self, dist: float) -> np.ndarray:
         """
         10 ms audio slice whose amplitude attenuates ~ inverse square with distance.
-        Single prototype sound (matches your audio env style).
+        Single prototype sound (matches audio env style).
         """
         sr, dur = 22050, 0.01
         t = np.linspace(0, dur, int(sr * dur), endpoint=False)
@@ -275,13 +290,19 @@ class ReachCubeEgoMultimodalStackedEnv:
 
         return tone + noise + additional
 
-    def _compute_spectrogram(self, audio: np.ndarray) -> torch.Tensor:
+    def _compute_spectrogram_slice(self, audio: np.ndarray) -> torch.Tensor:
+        """
+        Return LAST time-bin only: shape (F, 1).
+        (Keeps final stacked observation width = len(sample_offsets).)
+        """
         S = librosa.stft(audio, n_fft=512, hop_length=256)
-        S_db = librosa.amplitude_to_db(np.abs(S), ref=1.0)[:self.freq_bins, :self.time_bins_per_slice]
-        # Normalize explicit dB range [-20, 120] -> [0, 1]
-        S_db_norm = (S_db + 20.0) / 140.0
-        S_db_norm = np.clip(S_db_norm, 0.0, 1.0)
-        return torch.from_numpy(S_db_norm).float()
+        S_db = librosa.amplitude_to_db(np.abs(S), ref=1.0)
+        frame = S_db[: self.freq_bins, -1:]  # (F, 1)
+
+        # Normalize from [-20, +120] dB -> [0, 1]
+        S_norm = (frame + 20.0) / 140.0
+        S_norm = np.clip(S_norm, 0.0, 1.0)
+        return torch.from_numpy(S_norm).float()  # (F, 1)
 
     def _collect_spectrograms(self, play_audio_slice: bool = False) -> torch.Tensor:
         """
@@ -295,7 +316,7 @@ class ReachCubeEgoMultimodalStackedEnv:
 
         specs = []
         for i, dist in enumerate(dists):
-            audio = self.simulate_audio(dist)
+            audio = self.simulate_audio(float(dist))
             if i == self.listen_idx:
                 self.raw_audio_history.append(audio)
 
@@ -308,7 +329,7 @@ class ReachCubeEgoMultimodalStackedEnv:
                         self._audio_warned = True
                     self.enable_playback = False
 
-            spec = self._compute_spectrogram(audio)
+            spec = self._compute_spectrogram_slice(audio)
             specs.append(spec)
 
         return torch.stack(specs, dim=0).to(self.device)  # N×F×1
@@ -320,9 +341,9 @@ class ReachCubeEgoMultimodalStackedEnv:
         # Vision: concat along channel (3 * k)
         vis_obs = torch.cat([self.image_history[i] for i in self.sample_offsets], dim=1)  # N×(3k)×H×W
 
-        # Audio: concat along time for the stacked window
-        aud_slices = torch.cat([self.audio_history[i] for i in self.sample_offsets], dim=2)  # N×F×(k*1)
-        return vis_obs, aud_slices.unsqueeze(1)  # vision: N×(3k)×H×W, audio: N×1×F×T
+        # Audio: concat along time for the stacked window (F×k), then add channel dim
+        aud_slices = torch.cat([self.audio_history[i] for i in self.sample_offsets], dim=2)  # N×F×k
+        return vis_obs, aud_slices.unsqueeze(1)  # vision: N×(3k)×H×W, audio: N×1×F×k
 
     def _plot_multimodal_obs(self, vis_obs, aud_obs):
         plt.figure(self.fig_multimodal.number)
@@ -376,17 +397,112 @@ class ReachCubeEgoMultimodalStackedEnv:
                 self.enable_playback = False
 
     # -------------------------
-    # Reset (audio-style schedule, cube only)
+    # Curriculum utils
+    # -------------------------
+    def _anti_collapse_probs(self, per_pos_returns: np.ndarray, min_prob: float) -> np.ndarray:
+        """
+        Reverse-rank distribution:
+          - Positions with higher return -> lower prob next episode;
+          - Positions with lower return -> higher prob (bounded below by min_prob).
+        """
+        R = np.maximum(per_pos_returns.astype(np.float64), 0.0)
+        S = R.sum()
+        if not np.isfinite(S) or S <= 0.0:
+            return (np.ones(self.pos_count, dtype=np.float64) / self.pos_count).astype(np.float32)
+
+        p = R / S
+        order_low_to_high = np.argsort(R, kind="mergesort")  # stable
+        p_sorted_high_to_low = np.sort(p)[::-1]
+        q = np.empty_like(p)
+        q[order_low_to_high] = p_sorted_high_to_low
+        q = q / q.sum()
+
+        if min_prob and min_prob > 0.0:
+            q = np.maximum(q, min_prob)
+            q = q / q.sum()
+        return q.astype(np.float32)
+
+    def _ensure_each_position_present(self, idxs: np.ndarray) -> np.ndarray:
+        """If possible, ensure at least one env is assigned to each position."""
+        if self.num_envs < self.pos_count:
+            return idxs
+        missing = [i for i in range(self.pos_count) if i not in idxs]
+        if not missing:
+            return idxs
+        ptr = 0
+        for m in missing:
+            if ptr >= self.num_envs:
+                break
+            idxs[ptr] = m
+            ptr += 1
+        return idxs
+
+    # -------------------------
+    # Reset (anti-collapse curriculum, cube only)
     # -------------------------
     def reset(self):
         """
-        Reset episode:
-          - Choose cube position via hard/easy cycle (episode 1 starts hard).
-          - Reset robot.
-          - Place cube (batched across envs).
-          - Prime stacked histories by repeating the first frame/spec.
+        Inference:
+          - All envs take the same position, alternating hard/easy deterministically.
+        Training:
+          - Update anti-collapse probs from last episode's returns, then sample per-env positions,
+            optionally guaranteeing both positions appear.
         Returns: (vision_obs, audio_obs)
         """
+        # ---- Inference mode ----
+        if self.inference_mode:
+            self.episode_count += 1
+            self._episode_active = True
+            self._episode_return = 0.0
+
+            idx = self._infer_cycle_idx % self.pos_count  # 0: hard, 1: easy
+            self._infer_cycle_idx = (idx + 1) % self.pos_count
+
+            # shared position across all envs
+            self.env_pos_idx = np.full(self.num_envs, idx, dtype=np.int64)
+            pos1 = self.cube_positions[idx].reshape(1, 3)
+            self.current_cube_pos = np.repeat(pos1, self.num_envs, axis=0)
+
+            # reset robot & place cube
+            self._init_robot()
+            self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
+            self.scene.step()
+
+            print(f"[Inference] Episode {self.episode_count}: position='{self.pos_names[idx]}' "
+                  f"| pos={self.current_cube_pos[0].tolist()}")
+
+            # prime histories
+            self.image_history.clear(); self.audio_history.clear(); self.raw_audio_history.clear()
+            first_img = self._render()
+            first_spec = self._collect_spectrograms(play_audio_slice=False)
+            first_raw = self.raw_audio_history[-1].copy() if len(self.raw_audio_history) else np.zeros(int(self._sd_rate*0.01), dtype=np.float32)
+
+            self.image_history.clear(); self.audio_history.clear(); self.raw_audio_history.clear()
+            for _ in range(self.history_length):
+                self.image_history.append(first_img.clone())
+                self.audio_history.append(first_spec.clone())
+                self.raw_audio_history.append(first_raw.copy())
+
+            self._episode_return_per_env.zero_()
+            self._done_mask_episode.zero_()
+            self._step_count = 0
+            self.step_count = 0
+            return self._build_observation()
+
+        # ---- Training mode ----
+        if self._episode_active:
+            # update probs from last episode
+            per_env = self._episode_return_per_env.detach().cpu().numpy()
+            per_pos_returns = np.zeros(self.pos_count, dtype=np.float64)
+            for i in range(self.pos_count):
+                per_pos_returns[i] = per_env[self.env_pos_idx == i].sum()
+            self.pos_probs = self._anti_collapse_probs(per_pos_returns, min_prob=self.min_prob)
+
+            counts = np.bincount(self.env_pos_idx, minlength=self.pos_count)
+            print(f"[EP end] per-pos return={np.round(per_pos_returns, 3).tolist()} "
+                  f"| counts={counts.tolist()} "
+                  f"| next p={np.round(self.pos_probs, 3).tolist()}")
+
         # start new episode
         self.episode_count += 1
         self._episode_active = True
@@ -394,28 +510,22 @@ class ReachCubeEgoMultimodalStackedEnv:
         self._episode_return_per_env.zero_()
         self._done_mask_episode.zero_()
 
-        # choose position according to schedule
-        idx_in_cycle = (self.episode_count - 1) % self.cycle_length
-        if idx_in_cycle < self.hard_episodes:
-            one_pos = self.hard_pos  # HARD segment first
-            phase = "hard"
-        else:
-            one_pos = self.easy_pos  # EASY segment
-            phase = "easy"
+        # sample per-env positions
+        self.env_pos_idx = np.random.choice(self.pos_count, size=self.num_envs, p=self.pos_probs)
+        if self.ensure_each_position:
+            self.env_pos_idx = self._ensure_each_position_present(self.env_pos_idx)
+        self.current_cube_pos = np.stack([self.cube_positions[i] for i in self.env_pos_idx], axis=0)
 
-        # Broadcast across all envs
-        self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
-
-        # reset robot
+        # reset robot & place cube
         self._init_robot()
-
-        # place cube
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        print(f"Episode {self.episode_count}: phase={phase} | cube position = {self.current_cube_pos[0].tolist()}")
+        unique, counts = np.unique(self.env_pos_idx, return_counts=True)
+        asg = {self.pos_names[int(u)]: int(c) for u, c in zip(unique, counts)}
+        print(f"Episode {self.episode_count}: pos_probs={np.round(self.pos_probs, 3).tolist()} | assigned={asg}")
 
-        # prime histories
+        # prime histories with first multimodal slice
         self.image_history.clear(); self.audio_history.clear(); self.raw_audio_history.clear()
         first_img = self._render()
         first_spec = self._collect_spectrograms(play_audio_slice=False)
@@ -464,7 +574,6 @@ class ReachCubeEgoMultimodalStackedEnv:
             new_spec = self._collect_spectrograms(play_audio_slice=False)  # [N, F, 1]; appends raw for listen_idx
             last_raw = self.raw_audio_history[-1].copy() if len(self.raw_audio_history) else np.zeros(int(self._sd_rate*0.01), dtype=np.float32)
         else:
-            # reuse previous frame/spec for skipped steps
             new_img = self.image_history[-1]
             new_spec = self.audio_history[-1]
             last_raw = self.raw_audio_history[-1] if len(self.raw_audio_history) else np.zeros(int(self._sd_rate*0.01), dtype=np.float32)
@@ -479,7 +588,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         vis_obs, aud_obs = self._build_observation()
 
         # optional debug plotting & audio playback
-        if self.num_envs == 1 and (self.step_count % self.show_every == 0):
+        if self.num_envs == 1 and (self.step_count % self.show_every == 0) and self.enable_plotting:
             self._plot_multimodal_obs(vis_obs, aud_obs)
 
         # distance to cube (fingers midpoint)
@@ -518,16 +627,25 @@ if __name__ == "__main__":
     env = ReachCubeEgoMultimodalStackedEnv(
         vis=True,
         device=torch.device("cuda"),
-        # schedule/positions are configurable:
+        num_envs=8,                   # >1 learns both positions in parallel
+        listen_idx=0,
+        show_every=25,
+        render_every=5,
+        inference_mode=False,         # True -> deterministic alternating evaluation
+        hard_pos=[0.2, 0.8, 0.2],
+        easy_pos=[0.2, -0.8, 0.2],
+        min_prob=0.05,
+        ensure_each_position=True,
+        noise_config={"visual_noise_level": 0.00, "audio_noise_level": 0.00},
+        # legacy args kept for compatibility; ignored:
         hard_episodes=1,
         easy_episodes=1,
-        hard_pos=[0.5, -0.3, 0.2],
-        easy_pos=[0.2, -0.8, 0.2],
+        cube_positions=None,
     )
     vis_obs, aud_obs = env.reset()
     for _ in range(200):
         actions = torch.randint(0, 6, (env.num_envs,), device=env.device)
         (vis_obs, aud_obs), rewards, dones = env.step(actions)
         if dones.any():
-            print("Done!", dones)
+            print("Done!", dones.nonzero(as_tuple=False).flatten().tolist())
             break
