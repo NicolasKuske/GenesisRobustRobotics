@@ -111,6 +111,14 @@ class ReachCubeEgoAudioStackedEnv:
         self.obs_shape = (1, self.freq_bins, self.time_bins)
         self.action_space = 6
 
+        # --- Mic marker config ---
+        # --- NEW ---
+        mic_radius: float = 0.02,
+        mic_color = (1.0, 0.0, 0.0),
+        mic_offset_z: float = 0.05,
+        print_mic_xyz: bool = False,  # print [x,y,z] of listener mic
+        print_every: int = 10,  # how often to print
+
         # Matplotlib figure for live preview
         self._fig = plt.figure("Stacked Spectrogram Preview")
 
@@ -130,8 +138,6 @@ class ReachCubeEgoAudioStackedEnv:
         # Per-episode accounting per env (used only for probability update)
         self._episode_return_per_env = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self._done_mask_episode = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
-
 
     def _build_scene(self, show_viewer: bool):
         """Set up the Genesis scene, ground plane, robot, and cube."""
@@ -159,6 +165,15 @@ class ReachCubeEgoAudioStackedEnv:
             surface=gs.surfaces.Rough(color=(0.99, 0.82, 0.09)),
             material=gs.materials.Rigid(gravity_compensation=1.0)
         )
+
+        # --- NEW: microphone markers (one per env) ---
+        self.mic_markers = []
+        for _ in range(self.num_envs):
+            mic_marker = self.scene.add_entity(
+                gs.morphs.Sphere(radius=self.mic_radius, collision=False),
+                surface=gs.surfaces.Rough(color=self.mic_color),
+            )
+            self.mic_markers.append(mic_marker)
 
         # Build multiple copies if needed
         self.scene.build(n_envs=self.num_envs, env_spacing=(5.0, 5.0))
@@ -330,6 +345,7 @@ class ReachCubeEgoAudioStackedEnv:
         stacked = torch.cat(slices, dim=2)
         return stacked.unsqueeze(1)
 
+
     def reset(self) -> torch.Tensor:
         """
         Reset environment and start a new episode.
@@ -363,6 +379,21 @@ class ReachCubeEgoAudioStackedEnv:
             self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
             self.scene.step()
 
+            # --- NEW: update mic marker positions (midpoint between fingers) ---
+            left = self.franka.get_link("left_finger").get_pos()
+            right = self.franka.get_link("right_finger").get_pos()
+            mic_positions = ((left + right) / 2).cpu().numpy()
+            mic_positions[:, 2] += getattr(self, "mic_offset_z", 0.05)  # lift for visibility
+
+            mic_pos_tensor = torch.from_numpy(mic_positions).float().to(self.device)
+            for idx, mic_marker in enumerate(getattr(self, "mic_markers", [])):
+                mic_marker.set_pos(mic_pos_tensor[idx].unsqueeze(0), envs_idx=[idx])
+
+            # Optional: print listener mic XYZ
+            if getattr(self, "print_mic_xyz", False) and (self.num_envs > self.listen_idx >= 0):
+                lp = mic_positions[self.listen_idx]
+                print(f"[Mic@reset] env={self.listen_idx} pos=({lp[0]:.3f}, {lp[1]:.3f}, {lp[2]:.3f})")
+
             print(f"[Inference] Episode {self.episode_count}: pos idx={self.current_idx} "
                   f"pos={self.current_cube_pos[0]} | sound_id={self.current_sound_id}")
 
@@ -379,7 +410,7 @@ class ReachCubeEgoAudioStackedEnv:
                 self.raw_audio_history.append(first_raw.copy())
 
             obs = self._build_observation()
-            if self.num_envs == 1 and self._fig is not None:
+            if self.num_envs == 1 and getattr(self, "_fig", None) is not None:
                 self._plot_stacked(obs[0, 0])
 
             done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -425,6 +456,21 @@ class ReachCubeEgoAudioStackedEnv:
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
+        # --- NEW: update mic marker positions (midpoint between fingers) ---
+        left = self.franka.get_link("left_finger").get_pos()
+        right = self.franka.get_link("right_finger").get_pos()
+        mic_positions = ((left + right) / 2).cpu().numpy()
+        mic_positions[:, 2] += getattr(self, "mic_offset_z", 0.05)
+
+        mic_pos_tensor = torch.from_numpy(mic_positions).float().to(self.device)
+        for idx, mic_marker in enumerate(getattr(self, "mic_markers", [])):
+            mic_marker.set_pos(mic_pos_tensor[idx].unsqueeze(0), envs_idx=[idx])
+
+        # Optional: print listener mic XYZ
+        if getattr(self, "print_mic_xyz", False) and (self.num_envs > self.listen_idx >= 0):
+            lp = mic_positions[self.listen_idx]
+            print(f"[Mic@reset] env={self.listen_idx} pos=({lp[0]:.3f}, {lp[1]:.3f}, {lp[2]:.3f})")
+
         print(f"Episode {self.episode_count}: parallel sampling — "
               f"pos_probs={np.round(self.pos_probs, 3).tolist()} | sound_id={self.current_sound_id}")
 
@@ -442,12 +488,11 @@ class ReachCubeEgoAudioStackedEnv:
             self.raw_audio_history.append(first_raw.copy())
 
         obs = self._build_observation()
-        if self.num_envs == 1 and self._fig is not None:
+        if self.num_envs == 1 and getattr(self, "_fig", None) is not None:
             self._plot_stacked(obs[0, 0])
 
         done_array = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         return obs, done_array
-
 
     def step(self, actions: torch.Tensor):
         """
@@ -458,6 +503,7 @@ class ReachCubeEgoAudioStackedEnv:
           - base reward: exp(-4*dist), clamped to [0, 1]
           - per-env episode return is accumulated only until that env's first success
           - plays back the *not_stacked* audio window every `show_every` steps for num_envs==1
+          - updates a red mic marker (midpoint between fingers) every step
         """
         # Ensure actions are 1D int tensor on the right device
         actions = actions.long().to(self.device).view(-1)  # [num_envs]
@@ -473,7 +519,7 @@ class ReachCubeEgoAudioStackedEnv:
         ], device=self.device, dtype=self.pos.dtype)  # [6, 3]
 
         step_delta = deltas[actions]  # [num_envs, 3]
-        self.pos = self.pos + step_delta
+        self.pos = self.pos + step_delta  # update EE targets
 
         # IK control to reach the new pose
         qpos = self.franka.inverse_kinematics(link=self.end_effector, pos=self.pos, quat=self.quat)
@@ -481,8 +527,26 @@ class ReachCubeEgoAudioStackedEnv:
         self.franka.control_dofs_position(self.fixed_finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
 
+        # --- NEW: keep mic marker glued to gripper (midpoint between fingers) ---
+        left = self.franka.get_link("left_finger").get_pos()
+        right = self.franka.get_link("right_finger").get_pos()
+        mic_positions = ((left + right) / 2).cpu().numpy()
+        mic_positions[:, 2] += getattr(self, "mic_offset_z", 0.05)  # small lift for visibility
+
+        mic_pos_tensor = torch.from_numpy(mic_positions).float().to(self.device)
+        for idx, mic_marker in enumerate(getattr(self, "mic_markers", [])):
+            mic_marker.set_pos(mic_pos_tensor[idx].unsqueeze(0), envs_idx=[idx])
+
+        # Optional: print listener mic XYZ at interval
+        if getattr(self, "print_mic_xyz", False) and (self.num_envs > self.listen_idx >= 0):
+            # self.step_count is incremented inside _collect_spectrograms()
+            next_step_index = self.step_count + 1
+            if next_step_index % getattr(self, "print_every", 10) == 0:
+                lp = mic_positions[self.listen_idx]
+                print(f"[Mic@step {next_step_index}] env={self.listen_idx} pos=({lp[0]:.3f}, {lp[1]:.3f}, {lp[2]:.3f})")
+
         # Collect new spectrogram slice and append to history
-        new_slice = self._collect_spectrograms(play_audio=False)  # [num_envs, F, Tslice]
+        new_slice = self._collect_spectrograms(play_audio=False)  # [num_envs, F, Tslice]; bumps self.step_count
         self.audio_history.append(new_slice)
 
         # Optional: play the full not_stacked buffer at intervals (listener env only)
@@ -491,7 +555,7 @@ class ReachCubeEgoAudioStackedEnv:
 
         # Build not_stacked observation (num_envs, 1, F, Tstack)
         obs = self._build_observation()
-        if self.num_envs == 1 and self.step_count % self.show_every == 0:
+        if self.num_envs == 1 and self.step_count % self.show_every == 0 and getattr(self, "_fig", None) is not None:
             self._plot_stacked(obs[0, 0])
 
         # ---- Distance & reward ----
@@ -514,9 +578,7 @@ class ReachCubeEgoAudioStackedEnv:
         active_mask = (~self._done_mask_episode).float()  # [num_envs]
         self._episode_return_per_env += rewards * active_mask
         self._done_mask_episode |= success_mask  # latch per-env done
-
-        # Keep existing mean bookkeeping if used elsewhere
-        self._episode_return += rewards.mean().item()
+        self._episode_return += rewards.mean().item()  # legacy aggregate (if you use it elsewhere)
 
         # Done flags (per env)
         if self.report_success_as_done:
@@ -525,7 +587,6 @@ class ReachCubeEgoAudioStackedEnv:
             dones = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         return obs, rewards, dones
-
 
     def _plot_stacked(self, data: torch.Tensor):
         """

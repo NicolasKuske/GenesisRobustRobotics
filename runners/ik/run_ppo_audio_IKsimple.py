@@ -33,7 +33,7 @@ def train_ppo(args):
         vis=args.vis,
         device=args.device,
         num_envs=args.num_envs,
-        noise_config={"audio_noise_level": args.audio_noise_level}
+        #noise_config={"audio_noise_level": args.audio_noise_level}
     )
 
     agent = PPOAgentAudio(
