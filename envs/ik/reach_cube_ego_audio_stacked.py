@@ -61,7 +61,7 @@ class ReachCubeEgoAudioStackedEnv:
         self._sd_rate = 22050  # playback (and synthesis) sample rate
 
         # Speed of sound in air (m/s)
-        self._c_sound = 343.0
+        self._c_sound = 3.0
         self._sr = 22050
         self._slice_dur = 0.01  # 10 ms
 
