@@ -14,19 +14,24 @@ class ReachCubeEgoVisionStackedEnv:
     """
     Visual IK reaching environment with a Franka end-effector camera and stacked RGB history.
 
-    Positioning logic (audio-style):
-      - The cube alternates between two fixed positions:
-          * HARD for `hard_episodes` episodes in a row (episode 1 starts hard),
-          * then EASY for `easy_episodes` episodes in a row,
-        repeating this cycle indefinitely across resets.
+    This version uses a PARALLEL, ANTI-COLLAPSE curriculum over TWO cube positions:
+      - Positions: HARD and EASY (configurable via `hard_pos`, `easy_pos`)
+      - Training (inference_mode=False):
+          * At each reset, every env samples one of the two positions according to a learned
+            anti-collapse distribution (positions with *lower* recent return get *higher* prob).
+          * Optional: guarantee that both positions are present in the batch when num_envs >= 2.
+      - Inference (inference_mode=True):
+          * Deterministic global cycling: all envs share the same position; alternates hard/easy.
 
-      Defaults:
-          hard_pos = [0.5, -0.3, 0.2]
-          easy_pos = [0.2, -0.8, 0.2]
+    Notes:
+      - `easy_episodes` and `hard_episodes` are kept for call-site compatibility but are ignored.
+      - Only the cube exists in the scene (no sphere/bunny/dragon).
+      - Reward: exp(-4 * distance(fingers_midpoint, cube)) + success bonus inside a threshold.
+      - Observations: stacked RGB frames sampled at `sample_offsets`.
 
-    Only the cube exists in the scene (no sphere/bunny/dragon).
-    Reward: exp(-4 * distance(fingers_midpoint, cube)) + success bonus inside a threshold.
-    Observations: stacked RGB frames sampled at `sample_offsets`.
+    Default positions:
+      hard_pos = [0.2,  0.8, 0.2]
+      easy_pos = [0.2, -0.8, 0.2]
     """
 
     # -------------------------
@@ -39,19 +44,22 @@ class ReachCubeEgoVisionStackedEnv:
         num_envs: int = 1,
         randomize_every: int = 100,  # kept for compatibility; not used here
         noise_config: dict | None = None,
+
         # reward/done parity
         success_thresh: float = 0.3001,
         success_bonus: float = 20.0,
         report_success_as_done: bool = True,
 
-        # ---------- audio-style cube schedule ----------
-        easy_episodes: int = 1,
-        hard_episodes: int = 1,
-        hard_pos=None,   # defaults to [0.5, -0.3, 0.2] if None
+        # ---------- positions & (legacy) schedule args ----------
+        easy_episodes: int = 1,  # ignored (kept for compatibility)
+        hard_episodes: int = 1,  # ignored (kept for compatibility)
+        hard_pos=None,   # defaults to [0.2,  0.8, 0.2] if None
         easy_pos=None,   # defaults to [0.2, -0.8, 0.2] if None
-        # ------------------------------------------------
-        # kept for compatibility; ignored by the new schedule
-        inference_mode: bool = False,
+
+        # ---------- curriculum controls ----------
+        inference_mode: bool = False,   # deterministic cycle hard/easy shared across envs
+        min_prob: float = 0.05,         # probability floor in anti-collapse
+        ensure_each_position: bool = True,  # try to include both positions each episode (if possible)
     ):
         self.device = device
         self.num_envs = num_envs
@@ -64,15 +72,19 @@ class ReachCubeEgoVisionStackedEnv:
         self.success_bonus = success_bonus
         self.report_success_as_done = report_success_as_done
 
-        # ---------- schedule configuration ----------
-        self.easy_episodes = int(easy_episodes)
-        self.hard_episodes = int(hard_episodes)
-        assert self.easy_episodes > 0 and self.hard_episodes > 0, "easy_episodes and hard_episodes must be > 0"
-        self.cycle_length = self.easy_episodes + self.hard_episodes
+        # positions
+        hp = np.array(hard_pos if hard_pos is not None else [0.2,  0.8, 0.2], dtype=float).reshape(3,)
+        ep = np.array(easy_pos if easy_pos is not None else [0.2, -0.8, 0.2], dtype=float).reshape(3,)
+        self.cube_positions = [hp, ep]
+        self.pos_count = 2
+        self.pos_names = ["hard", "easy"]
 
-        self.hard_pos = np.array(hard_pos if hard_pos is not None else [0.2, 0.8, 0.2], dtype=float).reshape(1, 3)
-        self.easy_pos = np.array(easy_pos if easy_pos is not None else [0.2, -0.8, 0.2], dtype=float).reshape(1, 3)
-        # --------------------------------------------
+        # anti-collapse state
+        self.pos_probs = np.ones(self.pos_count, dtype=np.float32) / self.pos_count
+        self.env_pos_idx = np.zeros(self.num_envs, dtype=np.int64)
+        self.current_cube_pos = None  # (N, 3)
+        self.min_prob = float(min_prob)
+        self.ensure_each_position = bool(ensure_each_position)
 
         # per-episode accounting (success bookkeeping)
         self._episode_return_per_env = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
@@ -81,9 +93,8 @@ class ReachCubeEgoVisionStackedEnv:
         # state flags
         self._episode_active = False
         self._episode_return = 0.0
-
-        # kept for compatibility (not used for placement)
         self.inference_mode = inference_mode
+        self._infer_cycle_idx = 0  # 0 -> hard, 1 -> easy
 
         # stacked vision history config
         self.history_length = 25
@@ -225,19 +236,113 @@ class ReachCubeEgoVisionStackedEnv:
         return torch.cat(samples, dim=1)  # N×(3*k)×H×W
 
     # -------------------------
-    # Reset  (audio-style schedule, cube only)
+    # Curriculum utils
+    # -------------------------
+    def _anti_collapse_probs(self, per_pos_returns: np.ndarray, min_prob: float) -> np.ndarray:
+        """
+        Reverse-rank distribution:
+          - Positions with higher return -> lower prob next episode;
+          - Positions with lower return -> higher prob (bounded below by min_prob).
+        """
+        R = np.maximum(per_pos_returns.astype(np.float64), 0.0)
+        S = R.sum()
+        if not np.isfinite(S) or S <= 0.0:
+            return (np.ones(self.pos_count, dtype=np.float64) / self.pos_count).astype(np.float32)
+
+        p = R / S
+        order_low_to_high = np.argsort(R, kind="mergesort")   # stable
+        p_sorted_high_to_low = np.sort(p)[::-1]               # reverse
+        q = np.empty_like(p)
+        q[order_low_to_high] = p_sorted_high_to_low
+        q = q / q.sum()
+
+        if min_prob and min_prob > 0.0:
+            q = np.maximum(q, min_prob)
+            q = q / q.sum()
+        return q.astype(np.float32)
+
+    def _ensure_each_position_present(self, idxs: np.ndarray) -> np.ndarray:
+        """
+        If possible, make sure at least one env is assigned to each position.
+        Only acts when num_envs >= pos_count and a position is missing.
+        """
+        if self.num_envs < self.pos_count:
+            return idxs
+        missing = [i for i in range(self.pos_count) if i not in idxs]
+        if not missing:
+            return idxs
+        # Reassign a few envs (choose arbitrary unique env slots) to cover missing positions
+        unique_envs = np.unique(np.arange(self.num_envs))
+        ptr = 0
+        for m in missing:
+            if ptr >= len(unique_envs):
+                break
+            idxs[unique_envs[ptr]] = m
+            ptr += 1
+        return idxs
+
+    # -------------------------
+    # Reset
     # -------------------------
     def reset(self):
         """
-        Reset the episode and place the cube using the hard/easy cycle:
-
-          - Let cycle length = hard_episodes + easy_episodes.
-          - Episode 1..hard_episodes   -> HARD position
-          - Next easy_episodes         -> EASY position
-          - Repeat.
+        Inference:
+          - all envs take the same position, alternating hard/easy deterministically.
+        Training:
+          - update anti-collapse probabilities from last episode returns and then
+            sample per-env positions; optionally guarantee that both positions appear.
 
         Returns: obs [N, C, H, W]
         """
+        # ------ Inference mode ------
+        if self.inference_mode:
+            self.episode_count += 1
+            self._episode_active = True
+            self._episode_return = 0.0
+
+            idx = self._infer_cycle_idx % self.pos_count  # 0: hard, 1: easy
+            self._infer_cycle_idx = (idx + 1) % self.pos_count
+
+            # shared position across all envs
+            self.env_pos_idx = np.full(self.num_envs, idx, dtype=np.int64)
+            pos1 = self.cube_positions[idx].reshape(1, 3)
+            self.current_cube_pos = np.repeat(pos1, self.num_envs, axis=0)
+
+            # reset robot
+            self._init_robot()
+
+            # place cube
+            self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
+            self.scene.step()
+
+            print(f"[Inference] Episode {self.episode_count}: position='{self.pos_names[idx]}' "
+                  f"| pos={self.current_cube_pos[0].tolist()}")
+
+            # prime history
+            self.image_history.clear()
+            first = self._render()
+            for _ in range(self.history_length):
+                self.image_history.append(first.clone())
+
+            self._episode_return_per_env.zero_()
+            self._done_mask_episode.zero_()
+            self._step_count = 0
+            return self._build_observation()
+
+        # ------ Training mode ------
+        if self._episode_active:
+            # update position probabilities from last episode returns
+            per_env = self._episode_return_per_env.detach().cpu().numpy()
+            per_pos_returns = np.zeros(self.pos_count, dtype=np.float64)
+            for i in range(self.pos_count):
+                per_pos_returns[i] = per_env[self.env_pos_idx == i].sum()
+            self.pos_probs = self._anti_collapse_probs(per_pos_returns, min_prob=self.min_prob)
+
+            counts = np.bincount(self.env_pos_idx, minlength=self.pos_count)
+            print(f"[EP end] per-pos return={np.round(per_pos_returns,3).tolist()} "
+                  f"| counts={counts.tolist()} "
+                  f"| next p={np.round(self.pos_probs,3).tolist()}")
+
         # start new episode
         self.episode_count += 1
         self._episode_active = True
@@ -245,17 +350,11 @@ class ReachCubeEgoVisionStackedEnv:
         self._episode_return_per_env.zero_()
         self._done_mask_episode.zero_()
 
-        # choose position according to schedule
-        idx_in_cycle = (self.episode_count - 1) % self.cycle_length
-        if idx_in_cycle < self.hard_episodes:
-            one_pos = self.hard_pos  # HARD segment first
-            phase = "hard"
-        else:
-            one_pos = self.easy_pos  # EASY segment
-            phase = "easy"
-
-        # Broadcast across all envs
-        self.current_cube_pos = np.repeat(one_pos, self.num_envs, axis=0)
+        # sample per-env positions
+        self.env_pos_idx = np.random.choice(self.pos_count, size=self.num_envs, p=self.pos_probs)
+        if self.ensure_each_position:
+            self.env_pos_idx = self._ensure_each_position_present(self.env_pos_idx)
+        self.current_cube_pos = np.stack([self.cube_positions[i] for i in self.env_pos_idx], axis=0)
 
         # reset robot
         self._init_robot()
@@ -264,10 +363,11 @@ class ReachCubeEgoVisionStackedEnv:
         self.cube.set_pos(self.current_cube_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
-        print(
-            f"Episode {self.episode_count}: phase={phase} "
-            f"| cube position = {self.current_cube_pos[0].tolist()}"
-        )
+        # logging
+        unique, counts = np.unique(self.env_pos_idx, return_counts=True)
+        asg = {self.pos_names[int(u)]: int(c) for u, c in zip(unique, counts)}
+        print(f"Episode {self.episode_count}: pos_probs={np.round(self.pos_probs, 3).tolist()} "
+              f"| assigned={asg}")
 
         # prime history
         self.image_history.clear()
@@ -362,16 +462,18 @@ if __name__ == "__main__":
     env = ReachCubeEgoVisionStackedEnv(
         vis=True,
         device=torch.device("cuda"),
-        # schedule/positions are configurable:
-        hard_episodes=1,
-        easy_episodes=1,
-        hard_pos=[0.2, 0.8, 0.2],
+        num_envs=16,                 # set >1 to learn both positions in parallel
+        inference_mode=False,        # True -> deterministic alternating eval
+        hard_pos=[0.2,  0.8, 0.2],
         easy_pos=[0.2, -0.8, 0.2],
+        min_prob=0.05,
+        ensure_each_position=True,
     )
     obs = env.reset()
     for _ in range(200):
         actions = torch.randint(0, 6, (env.num_envs,), device=env.device)
         obs, rewards, dones = env.step(actions)
         if dones.any():
-            print("Done!", dones)
+            print("Done!", dones.nonzero(as_tuple=False).flatten().tolist())
+            # typically you'd continue stepping; this break is just a demo
             break
