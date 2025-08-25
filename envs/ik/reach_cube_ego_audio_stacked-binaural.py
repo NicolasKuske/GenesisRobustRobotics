@@ -60,11 +60,6 @@ class ReachCubeEgoAudioStackedEnv:
         self._audio_warned = False
         self._sd_rate = 22050  # playback (and synthesis) sample rate
 
-        # Speed of sound in air (m/s)
-        self._c_sound = 343.0
-        self._sr = 22050
-        self._slice_dur = 0.01  # 10 ms
-
         # Curriculum positions for the cube
         self.cube_positions = [
             np.array([0.6, -0.3, 0.6]),  # left up
@@ -253,28 +248,30 @@ class ReachCubeEgoAudioStackedEnv:
             self._warn_once(f"Playback disabled ({type(e).__name__}: {e})")
             self.enable_playback = False
 
-    def _generate_source_buffer(self) -> np.ndarray:
+    def simulate_audio(self, dist: float) -> np.ndarray:
         """
-        Generate a 10 ms mono 'scene' signal: carrier + background noise.
-        One shared source per step so ITD (time shift) is meaningful.
+        Generate a short (10 ms) mono audio snippet for a given distance using
+        one of four simple carriers + noise. Amplitude ~ 1 / dist^2.
         """
-        sr, dur = self._sr, self._slice_dur
+        sr, dur = 22050, 0.01
         t = np.linspace(0, dur, int(sr * dur), endpoint=False)
 
-        # ---- Carrier by current_sound_id (same as before, but mono) ----
-        sid = self.current_sound_id
-        if sid == 0:
-            carrier = chirp(t, f0=1000, f1=1000, t1=dur, method="linear")
-        elif sid == 1:
-            carrier = chirp(t, f0=600, f1=2400, t1=dur, method="quadratic")
-        elif sid == 2:
-            base = chirp(t, f0=1500, f1=1500, t1=dur, method="linear")
-            mod = 0.5 * (1.0 + np.sin(2 * np.pi * 8 * t))  # tremolo @ 8 Hz
+        # ----- Four alternative "source" sounds -----
+        if self.current_sound_id == 0:
+            carrier = chirp(t, f0=1000, f1=1000, t1=dur, method="linear")  # steady 1 kHz
+        elif self.current_sound_id == 1:
+            carrier = chirp(t, f0=600, f1=2400, t1=dur, method="quadratic")  # sweep 600→2400
+        elif self.current_sound_id == 2:
+            base = chirp(t, f0=1500, f1=1500, t1=dur, method="linear")       # 1.5 kHz
+            mod = 0.5 * (1.0 + np.sin(2 * np.pi * 8 * t))                    # tremolo @8 Hz
             carrier = base * mod
         else:
-            carrier = chirp(t, f0=200, f1=4000, t1=dur, method="linear")
+            carrier = chirp(t, f0=200, f1=4000, t1=dur, method="linear")     # rising 200→4000 Hz
 
-        # ---- Background scene noise (shared across ears) ----
+        # Distance attenuation (inverse-square law)
+        tone = carrier / (dist ** 2 + 1e-6)
+
+        # Background "scene" noise (sum of random chirps)
         noise = sum(
             np.random.rand() * chirp(
                 t,
@@ -285,8 +282,11 @@ class ReachCubeEgoAudioStackedEnv:
             for _ in range(5)
         ) * 0.1
 
-        scene = carrier + noise
-        return scene
+        # Additional configurable Gaussian noise
+        audio_noise_level = self.noise_config.get("audio_noise_level", 0.0)
+        additional_noise = np.random.normal(0, audio_noise_level, tone.shape)
+
+        return tone + noise + additional_noise
 
     def _compute_spectrogram(self, audio: np.ndarray) -> torch.Tensor:
         """
@@ -302,13 +302,9 @@ class ReachCubeEgoAudioStackedEnv:
 
     def _collect_spectrograms(self, play_audio: bool = False) -> torch.Tensor:
         """
-        For each env:
-          - build one mono source buffer (scene),
-          - compute ear delays TL, TR = d/c,
-          - realign by subtracting min(TL, TR) so at least one ear has 0 delay,
-          - apply fractional delay + inverse-square attenuation per ear,
-          - (optional) add small independent mic noise,
-          - compute spectrograms and return (N, 2, F, 1).
+        For each env: compute stereo audio (Left/Right finger distances),
+        convert to spectrograms, optionally play stereo audio (listener env only).
+        Returns a tensor (num_envs, 2, F, 1).
         """
         left_pos = self.franka.get_link("left_finger").get_pos()
         right_pos = self.franka.get_link("right_finger").get_pos()
@@ -319,48 +315,25 @@ class ReachCubeEgoAudioStackedEnv:
 
         specs = []
         for i in range(self.num_envs):
-            # One coherent source for this env
-            scene = self._generate_source_buffer()
+            audio_L = self.simulate_audio(dL[i])
+            audio_R = self.simulate_audio(dR[i])
 
-            # Propagation delays (absolute)
-            TL = dL[i] / self._c_sound
-            TR = dR[i] / self._c_sound
-
-            # Re-align so that the earliest arrival is time 0
-            T0 = min(TL, TR)
-            dL_rel = TL - T0
-            dR_rel = TR - T0
-
-            # Apply fractional delays
-            xL = self._fractional_delay(scene, dL_rel, self._sr)
-            xR = self._fractional_delay(scene, dR_rel, self._sr)
-
-            # Inverse-square attenuation (ILD)
-            eps = 1e-6
-            xL = xL / (dL[i] ** 2 + eps)
-            xR = xR / (dR[i] ** 2 + eps)
-
-            # Optional additional mic noise (independent per ear)
-            sigma = float(self.noise_config.get("audio_noise_level", 0.0))
-            if sigma > 0:
-                xL = xL + np.random.normal(0, sigma, size=xL.shape)
-                xR = xR + np.random.normal(0, sigma, size=xR.shape)
-
-            # Optional immediate playback (listener env only)
+            # Optional immediate playback of just this slice (stereo)
             if play_audio and i == self.listen_idx and self.num_envs == 1:
-                sd.play(np.column_stack([xL, xR]), self._sr)
+                sd.play(np.column_stack([audio_L, audio_R]), self._sd_rate)
                 sd.wait()
 
             # Record stereo raw audio only for the listener index
             if i == self.listen_idx:
-                self.raw_audio_history.append(np.column_stack([xL, xR]))  # (Nsamples, 2)
+                self.raw_audio_history.append(np.column_stack([audio_L, audio_R]))  # (Nsamples, 2)
 
             # Spectrograms per channel -> stack into (2, F, 1)
-            S_L = self._compute_spectrogram(xL)
-            S_R = self._compute_spectrogram(xR)
+            S_L = self._compute_spectrogram(audio_L)
+            S_R = self._compute_spectrogram(audio_R)
             S_pair = torch.stack([S_L, S_R], dim=0)  # (2, F, 1)
             specs.append(S_pair)
 
+        # Count this step
         self.step_count += 1
         return torch.stack(specs, dim=0).to(self.device)  # (N, 2, F, 1)
 
@@ -631,34 +604,6 @@ class ReachCubeEgoAudioStackedEnv:
             q = np.maximum(q, min_prob)
             q = q / q.sum()
         return q.astype(np.float32)
-
-    def _fractional_delay(self, x: np.ndarray, delay_sec: float, sr: int) -> np.ndarray:
-        """
-        Delay mono signal x by delay_sec (can be fractional). Output length == input length.
-        Simple linear interpolation with zero padding for pre-delay.
-        """
-        if abs(delay_sec) < 1e-9:
-            return x.copy()
-        d_samp = delay_sec * sr
-        n = np.arange(len(x))
-        # fractional index source positions
-        src_idx = n - d_samp
-        # integer neighbors
-        i0 = np.floor(src_idx).astype(int)
-        i1 = i0 + 1
-        frac = src_idx - i0
-
-        y = np.zeros_like(x)
-        valid0 = (i0 >= 0) & (i0 < len(x))
-        valid1 = (i1 >= 0) & (i1 < len(x))
-
-        # y = (1-frac)*x[i0] + frac*x[i1]
-        y_part0 = np.zeros_like(x)
-        y_part1 = np.zeros_like(x)
-        y_part0[valid0] = (1.0 - frac[valid0]) * x[i0[valid0]]
-        y_part1[valid1] = frac[valid1] * x[i1[valid1]]
-        y = y_part0 + y_part1
-        return y
 
 
 if __name__ == "__main__":
