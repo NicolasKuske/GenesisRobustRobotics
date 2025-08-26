@@ -114,7 +114,7 @@ def run(env, agent, args, writer):
         print(f"[Update {update}/{num_updates}] Avg Reward per Env: {ep_reward:.3f} | "
               f"Collected steps this update: {batch.rewards.shape[0]}")
 
-        if update % 3 == 0:
+        if update % 1 == 0:
             agent.save_checkpoint()
 
 
