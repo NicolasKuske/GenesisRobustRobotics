@@ -229,7 +229,7 @@ def arg_parser():
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
     p.add_argument("-t", "--task", type=str, default="ReachCubeEgoVisionStacked", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
-    p.add_argument("--visual_noise_level", type=float, default=0.0,
+    p.add_argument("-ns", "--visual_noise_level", type=float, default=0.0,
                    help="Gaussian noise std-dev added to RGB")
     p.add_argument("-m", "--mode", choices=['train', 'inference'], default='train',
                    help="Run mode")

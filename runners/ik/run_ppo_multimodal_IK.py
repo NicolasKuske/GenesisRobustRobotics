@@ -242,8 +242,8 @@ def arg_parser():
     p.add_argument("-d",  "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
 
     # noise flags (passed as noise_config to env)
-    p.add_argument("--visual_noise_level", type=float, default=0.0, help="Gaussian noise std-dev added to RGB")
-    p.add_argument("--audio_noise_level",  type=float, default=0.0, help="Audio Gaussian noise std-dev")
+    p.add_argument("-vns", "--visual_noise_level", type=float, default=0.0, help="Gaussian noise std-dev added to RGB")
+    p.add_argument("-ans", "--audio_noise_level",  type=float, default=0.0, help="Audio Gaussian noise std-dev")
 
     p.add_argument("-m",  "--mode", choices=['train', 'inference'], default='train', help="Run mode")
     p.add_argument("--num_episodes", type=int, default=100, help="Episodes for inference mode")

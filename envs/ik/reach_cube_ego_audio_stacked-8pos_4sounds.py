@@ -241,29 +241,21 @@ class ReachCubeEgoAudioStackedEnv:
         sr, dur = 22050, 0.01
         t = np.linspace(0, dur, int(sr * dur), endpoint=False)
 
-        # ----- Four alternative "source" sounds -----
         if self.current_sound_id == 0:
-            # Sound A: steady 1 kHz tone
             carrier = chirp(t, f0=1000, f1=1000, t1=dur, method="linear")
-
         elif self.current_sound_id == 1:
-            # Sound B: sweeping chirp 600→2400 Hz (quadratic)
             carrier = chirp(t, f0=600, f1=2400, t1=dur, method="quadratic")
-
         elif self.current_sound_id == 2:
-            # Sound C: 1.5 kHz tone with amplitude modulation (tremolo @ 8 Hz)
             base = chirp(t, f0=1500, f1=1500, t1=dur, method="linear")
-            mod = 0.5 * (1.0 + np.sin(2 * np.pi * 8 * t))  # in [0,1]
+            mod = 0.5 * (1.0 + np.sin(2 * np.pi * 8 * t))
             carrier = base * mod
-
-        else:  # self.current_sound_id == 3
-            # Sound D: rising chirp 200→4000 Hz (linear)
+        else:
             carrier = chirp(t, f0=200, f1=4000, t1=dur, method="linear")
 
         # Distance attenuation (inverse-square law)
         tone = carrier / (dist ** 2 + 1e-6)
 
-        # Base random background “scene” noise
+        # Base random background “scene” noise (keep as before)
         noise = sum(
             np.random.rand() * chirp(
                 t,
@@ -274,21 +266,25 @@ class ReachCubeEgoAudioStackedEnv:
             for _ in range(5)
         ) * 0.1
 
-        # Additional configurable Gaussian noise
-        audio_noise_level = self.noise_config.get("audio_noise_level", 0.0)
-        additional_noise = np.random.normal(0, audio_noise_level, tone.shape)
-
-        return tone + noise + additional_noise
+        # NOTE: no Gaussian "additional noise level" here anymore; we add it after spectrogram normalization
+        return tone + noise
 
     def _compute_spectrogram(self, audio: np.ndarray) -> torch.Tensor:
         S = librosa.stft(audio, n_fft=512, hop_length=256)
         S_db = librosa.amplitude_to_db(np.abs(S), ref=1.0)[:self.freq_bins, :self.time_bins]
 
-        # Explicit normalization: [-20 dB, 120 dB] → [0,1]
-        S_db_normalized = (S_db + 20) / 140
+        # Normalize [-20, 120] dB -> [0,1]
+        S_db_normalized = (S_db + 20.0) / 140.0
         S_db_normalized = np.clip(S_db_normalized, 0.0, 1.0)
 
-        return torch.from_numpy(S_db).float()
+        spec = torch.from_numpy(S_db_normalized).float()
+
+        # --- NEW: Gaussian noise in normalized [0,1] spectrogram domain ---
+        audio_noise_level = float(self.noise_config.get("audio_noise_level", 0.0))
+        if audio_noise_level > 0.0:
+            spec = torch.clamp(spec + torch.randn_like(spec) * audio_noise_level, 0.0, 1.0)
+
+        return spec
 
     def _collect_spectrograms(self, play_audio: bool = False) -> torch.Tensor:
         """

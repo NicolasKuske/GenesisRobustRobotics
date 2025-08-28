@@ -253,7 +253,7 @@ def arg_parser():
     p.add_argument("-n", "--num_envs", type=int, default=1, help="Number of envs")
     p.add_argument("-t", "--task", type=str, default="ReachCubeEgoAudioStacked", help="Task")
     p.add_argument("-d", "--device", type=str, default="cuda", help="cpu, cuda[:X], or mps")
-    p.add_argument("--audio_noise_level", type=float, default=0.0, help="Level of audio noise")
+    p.add_argument("-ns", "--audio_noise_level", type=float, default=0.0, help="Level of audio noise")
     p.add_argument("-m", "--mode", choices=['train', 'inference'], default='train', help="Run mode")
     # --- CHANGED default from 10 -> 100 ---
     p.add_argument("--num_episodes", type=int, default=100, help="Episodes for inference mode")
