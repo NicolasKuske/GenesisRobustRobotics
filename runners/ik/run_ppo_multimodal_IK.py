@@ -167,6 +167,7 @@ def inference_ppo(args):
     N = args.num_envs
     MAX_STEPS = 100
 
+    # Accumulators across all episodes (per-env), like audio/vision
     total_successes = torch.zeros(N, dtype=torch.long)
     total_steps_to_success = torch.zeros(N, dtype=torch.long)
     total_rewards = torch.zeros(N, dtype=torch.float32)
@@ -201,10 +202,12 @@ def inference_ppo(args):
             if reached.all():
                 break
 
+        # Episode accounting
         total_rewards += ep_reward
         total_successes += reached.long()
         total_steps_to_success += steps_to_success * reached.long()
 
+        # Per-episode logging/printing (kept as-is)
         mean_reward = ep_reward.mean().item()
         writer.add_scalar('Inference/MeanReward', mean_reward, ep)
         writer.add_scalar('Inference/StepsExecuted', steps, ep)
@@ -227,6 +230,25 @@ def inference_ppo(args):
             )
 
     writer.close()
+
+    # ---------- NEW: final summary (parity with audio/vision) ----------
+    successes_total = int(total_successes.sum().item())
+    attempts_total = N * args.num_episodes
+    success_rate = successes_total / attempts_total if attempts_total > 0 else 0.0
+
+    if successes_total > 0:
+        avg_steps_over_successes = (total_steps_to_success.sum().item() / successes_total)
+    else:
+        avg_steps_over_successes = float('nan')
+
+    avg_reward_per_env = (total_rewards / max(args.num_episodes, 1)).mean().item()
+
+    print("\n=== Inference Summary ===")
+    print(f"Episodes: {args.num_episodes} | Envs: {N} | Attempts: {attempts_total}")
+    print(f"Reached 30cm: {successes_total}/{attempts_total} ({success_rate*100:.1f}%)")
+    print(f"Avg steps-to-30cm over all successes: {avg_steps_over_successes:.1f}")
+    print(f"Mean reward per env (averaged over episodes): {avg_reward_per_env:.3f}")
+
 
 
 # -------------------------
