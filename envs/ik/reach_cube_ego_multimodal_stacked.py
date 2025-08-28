@@ -50,7 +50,7 @@ class ReachCubeEgoMultimodalStackedEnv:
         cube_positions=None,           # list of (x, y, z); if None, use 3×3 grid
         inference_mode: bool = False,  # when True, cycle positions deterministically
         ### NEW
-        train_object_count: int = 1,   # 1..4: restrict eligible object kinds for sampling
+        train_object_count: int = 4,   # 1..4: restrict eligible object kinds for sampling
     ):
         # --- core params ---
         self.device = device
