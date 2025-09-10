@@ -130,3 +130,7 @@ You can add `-d mps` to eval and visualization (-d cpu to run from cpu) :
 ```bash
 python runners/torque/run_ppo_vision_torque.py -d cpu -l -v -n 1 -t ReachCubeEgoVisionStackedTorque -d mps
 ```
+
+## 🙌 Acknowledgements 
+
+This project is part of the European Lighthouse to Manifest Trustworthy and Green AI https://enfield-project.eu/
