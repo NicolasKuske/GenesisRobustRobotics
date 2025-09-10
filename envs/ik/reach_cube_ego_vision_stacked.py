@@ -248,9 +248,12 @@ class ReachCubeEgoVisionStackedEnv:
             rgb = cam.render()[0]  # H×W×3, uint8
 
             # normalize first, then add Gaussian noise in normalized space
-            img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0  # [0,1]
+            img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0
             if noise_level > 0.0:
-                img = torch.clamp(img + torch.randn_like(img) * noise_level, 0.0, 1.0)
+               img = torch.clamp(img + torch.randn_like(img) * noise_level, 0.0, 1.0)
+
+            #img = torch.clamp(torch.randn(3, 120, 120) * noise_level, 0.0, 1.0)
+            #img = torch.ones(3, 120, 120)# * noise_level, 0.0, 1.0)
 
             imgs.append(img)
 

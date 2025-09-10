@@ -322,10 +322,11 @@ class ReachCubeEgoMultimodalStackedEnv:
 
             rgb = cam.render()[0]  # H×W×3, uint8
 
-            img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0  # [0,1]
+            img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float() / 255.0
             if noise_level > 0.0:
-                # normalized-space Gaussian noise (no /255.0)
                 img = torch.clamp(img + torch.randn_like(img) * noise_level, 0.0, 1.0)
+
+            #img = torch.clamp(torch.randn(3, 120, 120) * noise_level, 0.0, 1.0)
 
             imgs.append(img)
 
@@ -362,7 +363,10 @@ class ReachCubeEgoMultimodalStackedEnv:
         ) * 0.1
 
         # NOTE: no Gaussian "additional" here anymore; we add it after spectrogram normalization
+        #return tone + noise
+
         return tone + noise
+
 
     def _compute_spectrogram(self, audio: np.ndarray) -> torch.Tensor:
         S = librosa.stft(audio, n_fft=512, hop_length=256)
