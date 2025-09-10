@@ -196,5 +196,5 @@ def main():
     else:
         inference_ppo(args)
 
-if __name__ == "__main__":
+if __name__ == "__main__": # n + h = <3
     main()
