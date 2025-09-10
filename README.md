@@ -133,4 +133,10 @@ python runners/torque/run_ppo_vision_torque.py -d cpu -l -v -n 1 -t ReachCubeEgo
 
 ## 🙌 Acknowledgements 
 
-This project is part of the European Lighthouse to Manifest Trustworthy and Green AI https://enfield-project.eu/
+This research project is part of the ENFIELD initiative - European Lighthouse to Manifest Trustworthy and Green AI - https://enfield-project.eu/
+
+Cofunded by the European Union 
+
+In collaboration with the Eindhoven University of Technology (TU/e)
+
+and the Artificial and Natural Intelligence Toulouse Institute (ANITI)
